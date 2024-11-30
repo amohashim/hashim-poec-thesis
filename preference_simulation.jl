@@ -409,10 +409,7 @@ function randomly_generate_a_MappedDecomposedDichotomousQuestion(
 end
 
 function randomly_generate_a_MappedDecomposedIssue(dimensionality::Int64, n_questions::Int64,
-    issue_name::String
-    
-    for i in
-    )
+    issue_name::String)
 
 end
 
