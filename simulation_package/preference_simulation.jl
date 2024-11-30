@@ -1,6 +1,6 @@
 module PreferenceSimulation
 
-export QuestionAndIssueStructure, SimulationTools
+export QuestionAndIssueStructure, SimulationEssentials, SimulationUtilities
 
 module QuestionAndIssueStructure
 
