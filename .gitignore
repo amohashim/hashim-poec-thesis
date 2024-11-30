@@ -1,0 +1,10 @@
+# Ignore Julia virtual environment
+thesis_env/Manifest.toml
+docs/build
+
+# Ignore temporary files
+*.log
+*.tmp
+
+# Ignore system files
+.DS_Store
