@@ -46,14 +46,40 @@ struct ConnectedStateGraph
 
 end
 
-struct ConnectStateGraphWithDemographicDistributions
+struct ConnectedStateGraphWithDemographicDistributions
 
     # each dict in `thetas` maps a characteristic (e.g. :age) to the parameters of their 
     # distribution, for a given node (the vector is a vector of nodes)
 
     g::SimpleGraph # from ConnectedStateGraph
-    thetas::Vector{Dict{Symbol,Float}}
     params::ExogeneousParameters
+
+    # Outter dict is :state or :node
+    # Inner dict for :state is :characteristic => Vector(probabilities)
+    # Inner dict for :node is :characteristic => Vector( Vector(probabilities) )
+    # where each inner vector is the probability dist for node i, where i is the index (within
+    # the outter vector) that the inner vector is located at
+
+    distributions::Dict{
+        Symbol,Dict{Symbol,Union{Vector{Vector{Float64}},Vector{Float64}}}
+    }
+
+    function ConnectedStateGraphWithDemographicDistributions(
+        g::SimpleGraph, params::ExogeneousParameters
+    )
+        dictionary = Dict{Symbol,Dict{Symbol,Union{Vector{Vector{Float64}},Vector{Float64}}}}()
+
+        new(g, params, dictionary)
+
+    end
+end
+
+struct DemographicCharacteristic
+
+    characteristic::Symbol      # name, e.g. :race
+    n_categories::Int64
+    homogeneity::Symbol         # low, moderate, high, or perfect
+    scale_type::Symbol          # nominal or ordinal
 
 end
 
@@ -227,182 +253,230 @@ function connect_graph(initial_graph_attributes::InitialGraphAttrs)
 
 end
 
-# Function to generate the state
-# function generate_state(S::Int, D::String, P::String)
+# --------------------------------------- #
+# Gonna wanna put the following block into its own module
 
-#     # Map parameters to numerical values
-#     C = get_num_clusters(P, S)
-#     sigma_c = get_sigma_c(D)
-#     epsilon_intra = get_epsilon_intra(D)
+# Function to generate state-level probabilities for Low Homogeneity
+function get_base_probabilities_low(n_categories::Int64)
+    probs = ones(n_categories) / n_categories
+    return probs
+end
 
-#     # Generate cluster centers
-#     cluster_centers = rand(2, C)
+# Function to generate state-level probabilities for Medium Homogeneity (Nominal)
+function get_base_probabilities_medium_nominal(n_categories::Int64)
 
-#     # Assign nodes to clusters
-#     nodes_per_cluster = fill(floor(Int, S / C), C)
-#     for i in 1:(S%C)
-#         nodes_per_cluster[i] += 1
-#     end
-
-#     # Place nodes within clusters
-#     nodes = zeros(2, S)
-#     cluster_assignments = zeros(Int, S)
-#     idx = 1
-#     for c in 1:C
-#         n_c = nodes_per_cluster[c]
-#         mvn = MvNormal(cluster_centers[:, c], sigma_c^2 * I(2))
-#         for j in 1:n_c
-#             node_pos = rand(mvn)
-#             node_pos = clamp.(node_pos, 0.0, 1.0)
-#             nodes[:, idx] = node_pos
-#             cluster_assignments[idx] = c
-#             idx += 1
-#         end
-#     end
-
-#     # Construct the graph
-#     g = SimpleGraph(S)
-
-#     # Intra-cluster connections
-#     for c in 1:C
-#         cluster_indices = findall(cluster_assignments .== c)
-#         for i in cluster_indices
-#             for j in cluster_indices
-#                 if i < j && norm(nodes[:, i] - nodes[:, j]) ≤ epsilon_intra
-#                     add_edge!(g, i, j)
-#                 end
-#             end
-#         end
-#     end
-
-#     # Inter-cluster connections via MST
-#     # Compute distances between cluster centers
-#     distances = pairwise(Euclidean(), cluster_centers)
-#     cluster_graph = SimpleWeightedGraph(C)
-#     for i in 1:C
-#         for j in i+1:C
-#             add_edge!(cluster_graph, i, j, distances[i, j])
-#         end
-#     end
-
-#     # Minimum Spanning Tree
-#     mst_edges = minimum_spanning_tree(cluster_graph)
-
-#     # Connect clusters via the MST
-#     for e in mst_edges
-#         c1, c2 = src(e), dst(e)
-#         indices_c1 = findall(cluster_assignments .== c1)
-#         indices_c2 = findall(cluster_assignments .== c2)
-#         min_dist = Inf
-#         closest_pair = (0, 0)
-#         for i in indices_c1
-#             for j in indices_c2
-#                 dist = norm(nodes[:, i] - nodes[:, j])
-#                 if dist < min_dist
-#                     min_dist = dist
-#                     closest_pair = (i, j)
-#                 end
-#             end
-#         end
-#         add_edge!(g, closest_pair[1], closest_pair[2])
-#     end
-
-#     # Return the state object
-#     return State(S, 0, D, P, "", "", "", nodes, g, cluster_assignments, Dict())
-# end
-
-# Function to assign characteristics
-function assign_characteristics(state::State, H::String)
-    # Example for Race characteristic
-    K_race = 5  # Number of race categories
-
-    # Get Dirichlet parameters based on H
-    function get_alpha(H::String, K::Int)
-        if H == "Perfect"
-            alpha = ones(K)
-            alpha[rand(1:K)] = 1000.0
-        elseif H == "High"
-            alpha = ones(K)
-            alpha[rand(1:K)] = 100.0
-        elseif H == "Moderate"
-            alpha = fill(10.0, K)
-        elseif H == "Low"
-            alpha = ones(K)
-        else
-            error("Invalid value for H")
-        end
-        return alpha
+    n_prominent = min(3, n_categories)  # Choose 2 or 3 categories
+    prominent_categories = randperm(n_categories)[1:n_prominent]
+    n_non_prominent = n_categories - n_prominent
+    # Assign weights to prominent categories
+    α_prominent = fill(2.0, n_prominent)
+    ω_prominent = rand(Dirichlet(α_prominent))
+    # Assign weights to non-prominent categories
+    if n_non_prominent > 0
+        α_non_prominent = ones(n_non_prominent)
+        ω_non_prominent = rand(Dirichlet(α_non_prominent))
+    else
+        ω_non_prominent = Float64[]
     end
+    # Combine and normalize
 
-    alpha_race = get_alpha(H, K_race)
-    dirichlet_race = Dirichlet(alpha_race)
-    p_state_race = rand(dirichlet_race)
+    probs = zeros(n_categories)
+    idx = 1
+    for cat in 1:n_categories
+        if cat in prominent_categories
+            probs[cat] = ω_prominent[findfirst(==(cat), prominent_categories)]
+        else
+            if n_non_prominent > 0
+                probs[cat] = ω_non_prominent[idx]
+                idx += 1
+            end
+        end
+    end
+    probs /= sum(probs)
+    return probs
 
-    # Assign state-level parameters
-    state.theta[:race_state] = p_state_race
+end
 
-    # Initialize node-level parameters
-    state.theta[:race_node] = [copy(p_state_race) for _ in 1:state.S]
+# Function to generate state-level probabilities for Medium Homogeneity (Ordinal)
+function get_base_probabilities_medium_ordinal(n_categories::Int64)
+
+    peak_category = rand(1:n_categories)
+    distances = abs.(collect(1:n_categories) .- peak_category)
+    base_ω = exp.(-distances / 2.0)
+    noise = rand(n_categories) .* 0.4 .+ 0.8  # Uniform(0.8, 1.2)
+    ω = base_ω .* noise
+    probabilities = ω / sum(ω)
+
+    return probabilities
+end
+
+# Function to generate state-level probabilities for High Homogeneity (Ordinal)
+function get_base_probabilities_high(n_categories::Int64)
+
+    peak_category = rand(1:n_categories)
+    peak_prob = rand(Uniform(0.70, 0.85))
+    non_peak_categories = setdiff(1:n_categories, [peak_category])
+    remaining_prob = 1.0 - peak_prob
+    n_non_peak = n_categories - 1
+
+    if n_non_peak > 0
+        α_non_peak = ones(n_non_peak)
+        ω_non_peak = rand(Dirichlet(α_non_peak))
+        non_peak_probs = ω_non_peak .* remaining_prob
+    else
+        non_peak_probs = Float64[]
+    end
+    probs = zeros(n_categories)
+    probs[peak_category] = peak_prob
+    idx = 1
+    for cat in non_peak_categories
+        probs[cat] = non_peak_probs[idx]
+        idx += 1
+    end
+    return probs
+end
+
+# Function to generate state-level probabilities for Perfect Homogeneity
+function get_base_probabilities_perfect(n_categories::Int64)
+    peak_category = rand(1:n_categories)
+    probs = zeros(n_categories)
+    probs[peak_category] = 1.0
+    return probs
+end
+
+# Main function to generate state-level probabilities based on homogeneity and characteristic type
+function generate_state_level_probabilities(homogeneity::Symbol, characteristic_type::Symbol,
+    n_categories::Int64)
+    if homogeneity == :low
+        return get_base_probabilities_low(n_categories)
+    elseif homogeneity == :moderate
+        if characteristic_type == :nominal
+            return get_base_probabilities_medium_nominal(n_categories)
+        elseif characteristic_type == :ordinal
+            return get_base_probabilities_medium_ordinal(n_categories)
+        else
+            error("Invalid characteristic type: $characteristic_type")
+        end
+    elseif homogeneity == :high
+        return get_base_probabilities_high(n_categories)
+    elseif homogeneity == :perfect
+        return get_base_probabilities_perfect(n_categories)
+    else
+        error("Invalid homogeneity level: $homogeneity")
+    end
+end
+
+# --------------------------------------- #
+
+function assign_characteristics(state::ConnectedStateGraphWithDemographicDistributions,
+    demographic_characteristic::DemographicCharacteristic)
+
+    @unpack scale_type, n_categories, homogeneity, characteristic = demographic_characteristic
+    @unpack g, distributions, state_params = state
+    """
+    Assigns state-level and charactersitic-distribution parameters and initialize 
+    node-level characteristic-distribution parameters.
+    """
+    # Initialize dictionaries to store state-level and node-level parameters
+    distributions[:state] = Dict{Symbol,Vector{Float64}}()
+    distributions[:node] = Dict{Symbol,Vector{Vector{Float64}}}()
+
+    # Generate state-level probabilities
+    p_state = generate_state_level_probabilities(homogeneity, scale_type, n_categories)
+    distributions[:state][characteristic] = p_state
+
+    # Initialize node-level parameters as copies of the state-level probabilities
+    distributions[:node][characteristic] = [copy(p_state) for _ in 1:state_params.N_SEATS]
+
 end
 
 # Function to apply spatial autocorrelation
-function apply_spatial_autocorrelation(state::State, A::String)
-    # Map A to weight w
-    w = A == "None" ? 0.0 : A == "Low" ? 0.25 : A == "Moderate" ? 0.5 : 0.75
+function apply_spatial_autocorrelation(state::ConnectedStateGraphWithDemographicDistributions)
 
-    # Adjust node-level parameters for Race
-    theta_race = state.theta[:race_node]
-    for iter in 1:5
-        theta_race_new = deepcopy(theta_race)
-        for i in 1:state.S
-            neighbors = neighbors(state.g, i)
-            if !isempty(neighbors)
-                neighbor_params = [theta_race[j] for j in neighbors]
-                mean_neighbor = mean(reduce(hcat, neighbor_params); dims=2)
-                theta_race_new[i] = (1 - w) * theta_race[i] + w * vec(mean_neighbor)
+    @unpack distributions, params = state
+    # Map A to weight w
+
+    if params.SPATIAL_AUTOCOR == :none
+        w = 0.0
+    elseif params.SPATIAL_AUTOCOR == :low
+        w = 0.25
+    elseif params.SPATIAL_AUTOCOR == :moderate
+        w = 0.50
+    elseif params.SPATIAL_AUTOCOR == :high
+        w = 0.75
+    else
+        throw(DomainError("invalid value for params.SPATIAL_AUTOCOR"))
+    end
+
+    # Adjust node-level parameters for all characteristics
+    for characteristic in keys(distributions[:node])
+
+        characteristic_distributions = distributions[:node][characteristic]
+
+        for iter in 1:5
+
+            new_characteristic_distributions = deepcopy(characteristic_distributions)
+
+            for i in 1:params.N_SEATS
+
+                neighbor_indices = neighbors(g, i)
+
+                if !isempty(neighbor_indices)
+
+                    neighbor_params = [characteristic_distributions[j] for j in neighbor_indices]
+                    mean_neighbor = mean(hcat(neighbor_params...); dims=2)
+                    mean_neighbor = vec(mean_neighbor)
+                    # Adjust node-level prbobailities
+                    begin
+                        new_characteristic_distributions[i] =
+                            (1 - w) * characteristic_distributions[i] + w * mean_neighbor
+                    end
+                    # Normalize to ensure the probabilities sum to 1
+                    new_characteristic_distributions[i] /= sum(new_characteristic_distributions[i])
+
+                end
+            end
+            characteristic_distributions = new_characteristic_distributions
+        end
+        state.theta[:node][characteristic] = characteristic_distributions
+    end
+end
+
+function simulate_population(state::ConnectedStateGraphWithDemographicDistributions)
+
+    @unpack params, distributions = state
+    @unpack N_SEATS, N_POP = params
+
+    population_per_node = floor(Int, N_POP / N_SEATS)
+    remainder = N_POP % N_SEATS
+    population = Vector{Dict}()
+
+    for i in 1:N_SEATS
+
+        n_i = population_per_node + (i <= remainder ? 1 : 0)
+
+        person_records = [Dict{Symbol,Any}() for _ in 1:n_i]
+
+        for characteristic in keys(distributions[:node])
+
+            probs = state.theta[:node][characteristic][i]
+
+            # Sample from the node-level distribution
+            dist = Categorical(probs)
+            samples = rand(dist, n_i)
+
+            # Assign samples to person records
+            for (idx, person) in enumerate(person_records)
+                person[characteristic] = samples[idx]
             end
         end
-        theta_race = theta_race_new
-    end
-    state.theta[:race_node] = theta_race
-end
 
-# Function to apply urban heterogeneity
-function apply_urban_heterogeneity(state::State, U::String)
-    # Map U to a numerical factor
-    U_factor = U == "Low" ? 0.1 : U == "Moderate" ? 0.5 : 1.0
-
-    # Adjust homogeneity based on node degree
-    degrees = degree(state.g)
-    d_min, d_max = minimum(degrees), maximum(degrees)
-
-    for i in 1:state.S
-        degree_norm = (degrees[i] - d_min) / (d_max - d_min)
-        H_i = 1.0 + U_factor * degree_norm
-        # Adjust node-level parameters
-        # For Race, we can flatten the Dirichlet parameters towards uniform
-        theta_i = state.theta[:race_node][i]
-        theta_i = theta_i .^ (1 / H_i)
-        theta_i = theta_i / sum(theta_i)
-        state.theta[:race_node][i] = theta_i
-    end
-end
-
-# Function to simulate population
-function simulate_population(state::State, N::Int)
-    population_per_node = floor(Int, N / state.S)
-    remainder = N % state.S
-    population = []
-
-    for i in 1:state.S
-        n_i = population_per_node + (i <= remainder ? 1 : 0)
-        # Sample Race
-        race_dist = Categorical(state.theta[:race_node][i])
-        races = rand(race_dist, n_i)
-        # Create individual records (for simplicity, only Race is included)
-        for r in races
-            push!(population, Dict(:node => i, :race => r))
+        # Record node assignment
+        for person in person_records
+            person[:node] = i
         end
+
+        append!(population, person_records)
     end
     return population
 end
