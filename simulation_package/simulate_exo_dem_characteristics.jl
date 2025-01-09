@@ -1,3 +1,5 @@
+module ExogeneousDemographicCharacteristics
+
 # Function to generate state-level probabilities for Low Homogeneity
 function get_base_probabilities_low(n_categories::Int64)
     probs = ones(n_categories) / n_categories
@@ -107,3 +109,6 @@ function generate_state_level_probabilities(homogeneity::Symbol, characteristic_
         error("Invalid homogeneity level: $homogeneity")
     end
 end
+
+end
+
