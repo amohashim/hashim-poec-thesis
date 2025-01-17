@@ -100,15 +100,10 @@ function build_adjacency(coords::Matrix{Float64}; delta::Union{Nothing,Float64}=
     return adjacency
 end
 
-using LinearAlgebra
-using Distances
-using Random
-using Statistics
-
 function build_node_distributions(
-    coords::Matrix{Float64},
-    statewide_probs::Vector{Vector{Float64}},
-    A_values::Vector{Float64},
+    coords::AbstractMatrix{Float64},
+    statewide_probs::AbstractVector{Vector{Float64}},
+    A_values::AbstractVector{Float64},
     rng::MersenneTwister;
     alpha::Float64=1.0,
     beta::Float64=1.0,
