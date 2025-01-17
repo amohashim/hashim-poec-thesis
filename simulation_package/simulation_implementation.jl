@@ -1,11 +1,12 @@
 module SimulationImplementation
 
 using StatsBase  # Import StatsBase for Weights
+using Random
 
-function simulate_agents(node_dists::Array{Float64,3}, num_agents::Int;
+function simulate_agent_demographics(node_dists::Array{Float64,3}, num_agents::Int64;
     rng::AbstractRNG=MersenneTwister(42))
     """
-    Optimized agent simulation using vectorized sampling and cumulative probabilities.
+    Simuialtes agents' demographic characteristic
 
     Arguments:
         node_dists::Array{Float64, 3} - A 3D array of size (N, J, K),
@@ -17,22 +18,24 @@ function simulate_agents(node_dists::Array{Float64,3}, num_agents::Int;
         rng::AbstractRNG - Random number generator (default: MersenneTwister)
 
     Returns:
-        agents::Array{Int, 3} - A 3D array of size (N, num_agents, J),
+        agents::Array{Int64, 3} - A 3D array of size (N, num_agents, J),
             where:
             - Each entry corresponds to the group of an agent for a specific characteristic.
     """
-    N, J, K = size(node_dists)  # Dimensions: nodes, characteristics, groups
-    agents = Array{Int}(undef, N, num_agents, J)  # Preallocate storage
+    N, J, K = size(node_dists)  # Dimensions: nodes (districts), characteristics, groups
+    agents = Array{Int64}(undef, N, num_agents, J)  # Preallocate storage
 
     @inbounds for node in 1:N
-        for characteristic in 1:J
-            # Compute cumulative probabilities for the current node and characteristic
-            cumulative_probs = cumsum(node_dists[node, characteristic, :])
 
-            # Generate random numbers for all agents at once
+        # samples Inverse Transform Sampling Method
+
+        for characteristic in 1:J
+
+            #  compute cumulative probabilities for the given node and characteristic
+            cumulative_probs = cumsum(node_dists[node, characteristic, :])
             random_vals = rand(rng, num_agents)
 
-            # Use broadcasting to assign group indices to agents
+            # samplng agents' groups
             agents[node, :, characteristic] .= searchsortedfirst.(Ref(cumulative_probs), random_vals)
         end
     end
