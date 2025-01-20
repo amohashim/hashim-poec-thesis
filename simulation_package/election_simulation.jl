@@ -21,29 +21,31 @@ and return the party index (1..P) that yields the minimum sum.
 This function processes a single voter’s assignment.
 """
 function find_closest_representative_for_one_voter(
-    voter_ideals::Vector{Vector{Float64}},
-    parties::Vector{Matrix{Float64}},
-    n_parties::Int,
-    n_issues::Int
+    dist_sums::Vector{Float64},
+    voter_ideal_points::Vector{Vector{Float64}},
+    representative_ideal_points::Vector{Matrix{Float64}},
+    voter_issue_weights::Vector{Float64},
+    n_representatives::Int,
+    n_issues::Int,
+    issue_dimensions::AbstractVector{Int},
 )
     # We'll accumulate total distances in a local vector
-    zeros(Float64, n_parties)
-    dist_sums = Vector{Float64}(undef, n_parties)
     fill!(dist_sums, 0.0)   # set all party sums to zero
-    @inbounds for i in 1:n_issues
-        v_i = voter_ideals[i]     # d_i-vector (the voter)
-        d_i = length(v_i)
-        w_i = norm(v_i) / sqrt(d_i)
-        party_mat = parties[i]    # P x d_i
+    @inbounds for issue in 1:n_issues
+        v_i = voter_ideal_points[issue]     # d_i-vector (the voter)
+        d_i = issue_dimensions[issue]
+        w_i = voter_issue_weights[issue]
+        representative_mat = representative_ideal_points[issue]    # P x d_i
         # for each party p, compute the Euclidean distance in dimension i
-        @inbounds for p in 1:n_parties
+        @inbounds for rep in 1:n_representatives
             # distance on issue i: sum of squared differences in each dimension, then sqrt
             ssd = 0.0
+            # ssd = sum((v_i - representative_mat[rep, :]) .^ 2)
             @inbounds for dim in 1:d_i
-                diff = v_i[dim] - party_mat[p, dim]
+                diff = v_i[dim] - representative_mat[rep, dim]
                 ssd += diff * diff
             end
-            dist_sums[p] += w_i * sqrt(ssd)
+            dist_sums[rep] += w_i * sqrt(ssd)
         end
     end
 
@@ -52,7 +54,12 @@ function find_closest_representative_for_one_voter(
     _, idx = findmax(utilities)
     return idx, utilities
 end
+
+
 """
+
+For static number of parties
+
     assign_voters_to_parties!(
         agents_ideals::Vector{Array{Float64,3}},
         parties::Vector{Matrix{Float64}}
@@ -66,12 +73,14 @@ each party, and assign the voter to the closest party. Return an N x A
 matrix containing the assigned party index for each (n,a).
 """
 function assign_voters_to_parties!(
-    agents_ideals::AbstractVector{Array{Float64,3}},
-    parties::AbstractVector{Matrix{Float64}},
+    voter_ideal_points::AbstractVector{Array{Float64,3}}, # all ideal points
+    party_ideal_points::AbstractVector{Matrix{Float64}},
+    voter_issue_weights::Array{Float64,3},
     n_parties::Int,
     n_issues::Int,
     n_seats::Int,
-    pop_per_seat::Int
+    pop_per_seat::Int,
+    issue_dimensions::AbstractVector{Int}
 )
 
     # We'll produce an N x A result
@@ -89,18 +98,28 @@ function assign_voters_to_parties!(
         # We'll allocate a zero-length Vector for each i initially
         voter_ideals[issue] = Float64[]
     end
+
+    dist_sums = Vector{Float64}(undef, n_parties)
+
     @inbounds for seat in 1:n_seats
+
+        seat_issue_weights = @view voter_issue_weights[:, seat, :]
+
         @inbounds for voter in 1:pop_per_seat
             # Step 1: gather the voter's ideal for each issue i
             @inbounds for issue in 1:n_issues
-                d_i = size(parties[issue], 2)  # the relevant dimension for this issue
+
+                d_i = issue_dimensions[issue] # the relevant dimension for this issue
                 # We'll just take a *view* into agents_ideals[i][n, a, 1:d_i]
                 # For performance, we can do something like:
-                voter_ideals[issue] = @views agents_ideals[issue][seat, voter, 1:d_i]
+                voter_ideals[issue] = @views voter_ideal_points[issue][seat, voter, 1:d_i]
             end
+
+            issue_weights = seat_issue_weights[:, voter]
             # Step 2: find the closest party
-            party_idx, utilities = find_closest_representative_for_one_voter(voter_ideals, parties,
-                n_parties, n_issues)
+            party_idx, utilities = find_closest_representative_for_one_voter(dist_sums,
+                voter_ideals, party_ideal_points, issue_weights, n_parties, n_issues,
+                issue_dimensions)
             # Step 3: store
             result[seat, voter] = party_idx
             voter_utilities[seat, voter, :] = utilities
@@ -109,19 +128,22 @@ function assign_voters_to_parties!(
     return result, voter_utilities
 end
 
+
 """
 
-mememememememe 
+For fixed number of candidates in the district
 
 """
 function assign_voters_to_candidates!(
-    agents_ideals::AbstractVector{Array{Float64,3}},
-    candidate_points::AbstractVector{Matrix{Float64}},
+    dist_sums::Vector{Float64},
+    voter_ideal_points::AbstractVector{Array{Float64,3}},
+    candidate_ideal_points::AbstractVector{Matrix{Float64}},
+    voter_issue_weights::Array{Float64,3},
     n_candidates::Int,
     n_issues::Int,
+    seat::Int,
     pop_per_seat::Int,
-    issue_dimensions::AbstractVector{Int},
-    seat::Int
+    issue_dimensions::AbstractVector{Int}
 )
     # We'll produce an N x A result
     result = Matrix{Int}(undef, 1, pop_per_seat)
@@ -138,18 +160,74 @@ function assign_voters_to_candidates!(
         # We'll allocate a zero-length Vector for each i initially
         voter_ideals[issue] = Float64[]
     end
+
     @inbounds for voter in 1:pop_per_seat
         # Step 1: gather the voter's ideal for each issue i
         @inbounds for issue in 1:n_issues
             d_i = issue_dimensions[issue]  # the relevant dimension for this issue
             # We'll just take a *view* into agents_ideals[i][n, a, 1:d_i]
             # For performance, we can do something like:
-            voter_ideals[issue] = @views agents_ideals[issue][seat, voter, 1:d_i]
+            voter_ideals[issue] = @views voter_ideal_points[issue][seat, voter, 1:d_i]
         end
         # Step 2: find the closest party
-        party_idx, utilities = find_closest_representative_for_one_voter(
-            voter_ideals, candidate_points, n_candidates, n_issues
+
+        issue_weights = voter_issue_weights[:, seat, voter]
+        party_idx, utilities = find_closest_representative_for_one_voter(dist_sums,
+            voter_ideals, candidate_ideal_points, issue_weights, n_candidates, n_issues,
+            issue_dimensions
         )
+        # Step 3: store
+        result[1, voter] = party_idx
+        voter_utilities[voter, :] = utilities
+    end
+
+    return result, voter_utilities
+end
+
+"""
+For dynamic number of candidates in the district
+
+"""
+function assign_voters_to_candidates!(
+    voter_ideal_points::AbstractVector{Array{Float64,3}},
+    candidate_ideal_points::AbstractVector{Matrix{Float64}},
+    voter_issue_weights::Array{Float64,3},
+    n_candidates::Int,
+    n_issues::Int,
+    seat::Int,
+    pop_per_seat::Int,
+    issue_dimensions::AbstractVector{Int}
+)
+    # We'll produce an N x A result
+    result = Matrix{Int}(undef, 1, pop_per_seat)
+    voter_utilities = Matrix{Float64}(undef, pop_per_seat, n_candidates)
+    # To avoid repeated allocations, we can store each voter's I-dimensional vector-of-vectors
+    # in a pre-existing structure. We'll do a small trick: create a container to hold references
+    # to dimension slices. Something like: voter_ideals[i] = some d_i-vector.
+    # We'll reuse this container for each (n,a).
+    # Pre-allocate container for voter_i for each i
+    # We'll store them as Vectors, but we do not want to re-allocate the underlying arrays each time.
+    # We'll just "view" the slice of the 3D array for dimension handling.
+    voter_ideals = Vector{Vector{Float64}}(undef, n_issues)
+    @inbounds for issue in 1:n_issues
+        # We'll allocate a zero-length Vector for each i initially
+        voter_ideals[issue] = Float64[]
+    end
+
+    dist_sums = Vector{Float64}(undef, n_candidates)
+    @inbounds for voter in 1:pop_per_seat
+        # Step 1: gather the voter's ideal for each issue i
+        @inbounds for issue in 1:n_issues
+            d_i = issue_dimensions[issue]  # the relevant dimension for this issue
+            # We'll just take a *view* into agents_ideals[i][n, a, 1:d_i]
+            # For performance, we can do something like:
+            voter_ideals[issue] = @views voter_ideal_points[issue][seat, voter, 1:d_i]
+        end
+        # Step 2: find the closest party
+        issue_weights = voter_issue_weights[:, seat, voter]
+        party_idx, utilities = find_closest_representative_for_one_voter(dist_sums,
+            voter_ideal_points, candidate_ideal_points, issue_weights, n_candidates,
+            n_issues, issue_dimensions)
         # Step 3: store
         result[1, voter] = party_idx
         voter_utilities[voter, :] = utilities
@@ -208,8 +286,8 @@ function find_candidate_ideal_points(ideal_points::AbstractVector{Array{Float64,
 end
 
 function run_single_round_election(ideal_points::AbstractVector{Array{Float64,3}},
-    candidates::Vector{Vector{Int}}, n_seats::Int, n_candidates::Int, n_issues::Int,
-    pop_per_seat::Int, issue_dimensions::AbstractVector{Int})
+    candidates::Vector{Vector{Int}}, voter_issue_weights::Array{Float64,3}, n_seats::Int,
+    n_candidates::Int, n_issues::Int, pop_per_seat::Int, issue_dimensions::AbstractVector{Int})
 
     election_proportions = Vector{Dict{Int,Float64}}(undef, n_seats)
     voter_utilites = Array{Float64,3}(undef, n_seats, pop_per_seat, n_candidates)
@@ -219,9 +297,11 @@ function run_single_round_election(ideal_points::AbstractVector{Array{Float64,3}
         candidate_points, candidate_map = find_candidate_ideal_points(
             ideal_points, candidates[seat], n_candidates, seat, n_issues
         )
-        results, utilities = assign_voters_to_candidates!(
-            ideal_points, candidate_points, n_candidates, n_issues, pop_per_seat,
-            issue_dimensions, seat
+
+        dist_sums = Vector{Float64}(undef, n_candidates)
+        results, utilities = assign_voters_to_candidates!(dist_sums,
+            ideal_points, candidate_points, voter_issue_weights, n_candidates, n_issues, seat,
+            pop_per_seat, issue_dimensions
         )
 
         candidate_choices[seat, :] = results
@@ -352,6 +432,44 @@ function build_voter_rankings_dot!(
             rankings_n[v, rank_idx] = c_local
         end
     end
+end
+
+"""
+N x A x C array where each entry in rankings[n,:,:] is what rank voter a gives candidate C
+
+So, rows are voters and columns are candidates; this is NOT rows are voters and columsn are rankings
+
+"""
+function compute_voter_rankings(candidate_utilities::Array{Float64,3}, n_seats::Int,
+    pop_per_seat::Int, n_candidates::Int)
+
+    # Prepare an output array for the rankings.
+    rankings = Array{Int}(undef, n_seats, pop_per_seat, n_candidates)
+
+    # Preallocate arrays used inside loops
+    rank = Vector{Int}(undef, n_candidates)
+    sorted_indices = Vector{Int}(undef, n_candidates)
+
+    for seat in 1:n_seats
+
+        for voter in 1:pop_per_seat
+            # Extract the utilities for the voter
+            utilities = @view candidate_utilities[seat, voter, :]
+
+            # Sort indices by descending utilities
+            sortperm!(sorted_indices, utilities, rev=true)
+
+            # Compute ranks directly
+            for candidate in 1:n_candidates
+                rank[sorted_indices[candidate]] = candidate
+            end
+
+            # Assign computed ranks to the output
+            @views rankings[seat, voter, :] = rank
+        end
+    end
+
+    return rankings
 end
 
 

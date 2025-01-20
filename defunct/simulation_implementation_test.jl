@@ -7,21 +7,23 @@ include("candidate_simulation.jl")
 include("election_simulation.jl")
 include("tangian_indices.jl")
 include("evaluation_metrics.jl")
+include("majoritarian_evaluation_metrics.jl")
 
 using Random
 using StaticArrays
 using Distributions
 using DataStructures
-using .ExogeneousDemographicCharacteristics
-using .SpatialCharacteristics
-using .EndogeneousDemogprahicCharacteristics
-using .SimulateIssuePreferences
-using .SimulateQuestionPreferences
-using .PartySimulation
-using .CandidateSimulation
-using .ElectionSimulation
-using .TangianIndices
-using .ProportionalEvaluationMetrics
+using ..ExogeneousDemographicCharacteristics
+using ..SpatialCharacteristics
+using ..EndogeneousDemogprahicCharacteristics
+using ..SimulateIssuePreferences
+using ..SimulateQuestionPreferences
+using ..PartySimulation
+using ..CandidateSimulation
+using ..ElectionSimulation
+using ..TangianIndices
+using ..ProportionalEvaluationMetrics
+using ..HelpfulFunctions
 
 # Global Constants
 const RNG = MersenneTwister(2024)
@@ -102,6 +104,14 @@ const N_ITERS = 100
 n_iterations = N_ITERS
 const SAMPLE_SIZE = 400
 sample_size = 400
+
+function find_repeated_vals_computed_from_constants(issue_dimensions::AbstractVector{Int})
+
+    sqrt_dis = sqrt.(issue_dimensions)
+
+    return sqrt_dis
+end
+
 """
 Vector of vectors of equal length; each vector is the distribution for a given demographic
 characteristic
@@ -124,29 +134,6 @@ function generate_statewide_distributions(homogeneity::AbstractVector{Symbol},
 
 
     return statewide_distributions
-
-end
-
-"""
-Array with the following dimensions:
-N x C x d_max
-
-where N is the number of districts, C is the number of charactersitics, and d_max is the maximum
-number of groups
-
-"""
-function generate_spatial_characteristics(n_metros::Int, spatial_dispersion::Float64,
-    n_seats::Int, urbanization::Float64, urban_sprawl::Float64, a_vals::AbstractVector{Float64},
-    statewide_distributions::Vector{Vector{Float64}},
-)::Array{Float64,3}
-
-    centers = SpatialCharacteristics.generate_cluster_centers(n_metros, spatial_dispersion, RNG)
-    coords, is_urban = SpatialCharacteristics.place_nodes(n_seats, urbanization, centers,
-        urban_sprawl, RNG)
-    node_dists = SpatialCharacteristics.build_node_distributions(coords, statewide_distributions,
-        a_vals, RNG)
-
-    return node_dists
 
 end
 
@@ -175,7 +162,7 @@ function generate_voters(demographic_salience::AbstractVector{Symbol},
     )
 
     voter_demographics = EndogeneousDemogprahicCharacteristics.simulate_agents_with_salience(
-        node_dists, salience_lookup, pop_per_node; rng=RNG
+        node_dists, salience_lookup, pop_per_node, RNG
     )
 
     return voter_demographics
@@ -207,12 +194,12 @@ function generate_scaled_ideal_points(demographic_cleavage_salience::AbstractMat
         )
 
         ideal_points_per_issue[issue] = SimulateIssuePreferences.generate_ideal_points(
-            voters, θ, σ_none, σ_low, σ_moderate, σ_high, issue_dimensions[issue]; rng=RNG
+            voters, θ, σ_none, σ_low, σ_moderate, σ_high, issue_dimensions[issue], rng
         )
 
     end
 
-    results = SimulateQuestionPreferences.z_scale_points_for_tangian.(ideal_points_per_issue)
+    results = HelpfulFunctions.z_scale_points.(ideal_points_per_issue)
 
     ideal_points_scaled, scaled_means, scaled_variances = map(x -> getindex.(results, x), 1:3)
 
@@ -294,20 +281,6 @@ function generate_parties(ideal_point_means::AbstractVector{Vector{Float64}},
     return party_ideal_points
 end
 
-@inline function convert_party_ideal_points_to_arrs(n_issues::Int, n_parties::Int,
-    issue_dims::AbstractVector{Int}, party_ideal_points::AbstractVector{Matrix{Float64}}
-)
-
-    reshaped_party_ideal_points = Vector{Array{Float64,3}}(undef, n_issues)  # Adjust type
-
-    @inbounds for k in 1:N_ISSUES
-        reshaped_party_ideal_points[k] = Array{Float64,3}(undef, 1, n_parties, issue_dims[k])
-        reshaped_party_ideal_points[k][1, :, :] .= party_ideal_points[k]
-    end
-
-    return SVector{n_issues,Array{Float64,3}}(reshaped_party_ideal_points)
-
-end
 
 function candidate_entry(ideal_points::AbstractVector{Array{Float64,3}}, α::Float64,
     p_norm::Float64, n_candidates::Int, n_seats::Int, pop_per_seat::Int
@@ -328,20 +301,22 @@ end
 
 
 function run_majoritarian_election(ideal_points::AbstractVector{Array{Float64,3}},
-    candidates::Vector{Vector{Int}}, n_seats::Int, n_candidates::Int, n_issues::Int,
-    pop_per_seat::Int, issue_dimensions::AbstractVector)
+    voter_issue_weights, candidates::Vector{Vector{Int}}, n_seats::Int, n_candidates::Int,
+    n_issues::Int, pop_per_seat::Int, issue_dimensions::AbstractVector)
 
     begin
         first_round_results, voter_utilities, first_round_candidate_choices =
-            ElectionSimulation.run_single_round_election(
-                ideal_points, candidates, n_seats, n_candidates, n_issues, pop_per_seat, issue_dimensions
+            ElectionSimulation.run_single_round_election(ideal_points, candidates,
+                voter_issue_weights, n_seats, n_candidates, n_issues, pop_per_seat,
+                issue_dimensions
             )
     end
 
     run_off_candidates = ElectionSimulation.tally_top_2(first_round_results, n_seats)
 
-    second_round_results, _, _ = ElectionSimulation.run_single_round_election(
-        ideal_points, run_off_candidates, n_seats, 2, n_issues, pop_per_seat, issue_dimensions
+    second_round_results, _, _ = ElectionSimulation.run_single_round_election(ideal_points,
+        run_off_candidates, voter_issue_weights, n_seats, 2, n_issues, pop_per_seat,
+        issue_dimensions
     )
 
     winning_candidates = ElectionSimulation.tally_top_1(second_round_results, n_seats)
@@ -362,32 +337,7 @@ end
 
 end
 
-function evaluate_party_profiles(n_parties::Int, n_issues::Int, n_seats::Int,
-    pop_per_seat::Int, voter_question_positions::AbstractVector{Array{Float64,3}},
-    party_question_positions::AbstractVector{Array{Float64,3}},
-    voter_issue_weights::Array{Float64,3}, n_questions::AbstractVector{Int})
-
-    coalition_options = ProportionalEvaluationMetrics.build_coalition_options(n_parties)
-    n_coalitions = length(coalition_options)
-    begin
-        coalition_profiles, coalition_unanimities, coalition_qualified_unanimities =
-            ProportionalEvaluationMetrics.build_party_profile_options(coalition_options,
-                party_question_positions, n_issues, n_questions)
-
-    end
-
-    profile_utilities = ProportionalEvaluationMetrics.compute_utilities_for_party_profiles(
-        voter_question_positions, coalition_profiles, voter_issue_weights, n_coalitions,
-        n_seats, pop_per_seat, n_issues
-    )
-
-    begin
-        return coalition_options, coalition_profiles, profile_utilities, coalition_unanimities,
-        coalition_qualified_unanimities
-    end
-
-end
-
+``
 @inline function scale_utilities(profile_utilities::Array{Float64,3})
 
     min_val = minimum(profile_utilities)
@@ -405,7 +355,7 @@ function main()
     )
 
     @time district_dists = generate_spatial_characteristics(N_METROS, SPATIAL_DISPERSION,
-        N_SEATS, URBANIZATION, URBAN_SPRAWL, A_VALS, statewide_demographic_dists,
+        N_SEATS, URBANIZATION, URBAN_SPRAWL, A_VALS, statewide_demographic_dists, RNG
     )
 
     @time voters = generate_voters(DEMOGRAPHIC_SALIENCE, N_CHARACTERISTICS,
@@ -437,10 +387,17 @@ function main()
         N_ISSUES, ISSUE_DIMS
     )
 
+
     @time preferred_parties, proportional_voter_utilities =
-        ElectionSimulation.assign_voters_to_parties!(
-            ideal_points, party_ideal_points, N_PARTIES, N_ISSUES, N_SEATS, POP_PER_NODE
+        ElectionSimulation.assign_voters_to_parties!(ideal_points, party_ideal_points,
+            voter_issue_weights, N_PARTIES, N_ISSUES, N_SEATS, POP_PER_NODE, ISSUE_DIMS
         )
+
+    ## ----------------------------------------------------------------------------------------- ##
+    ##                                 PROPORTIONAL ELECTION                                     ##
+    ## ----------------------------------------------------------------------------------------- ##
+
+    proportional_voter_utilities = scale_utilities(proportional_voter_utilities)
 
     @time party_ideal_points = convert_party_ideal_points_to_arrs(N_ISSUES, N_PARTIES, ISSUE_DIMS,
         party_ideal_points
@@ -453,53 +410,43 @@ function main()
     @time party_question_positions = generate_question_positions(ISSUE_DIMS, N_ISSUES, N_QUESTIONS,
         N_POSITIONS, party_ideal_points, GAMMA, 1, N_PARTIES)
 
-    @time candidates = candidate_entry(ideal_points, α, P_NORM, N_CANDIDATES, N_SEATS, POP_PER_NODE)
-
-    @time winning_candidates, majoritarian_voter_utilities, first_round_candidate_choices =
-        run_majoritarian_election(ideal_points, candidates, N_SEATS, N_CANDIDATES, N_ISSUES,
-            POP_PER_NODE, ISSUE_DIMS
-        )
-
     @time winning_parties = run_proportional_election(
         preferred_parties, N_SEATS, POP_PER_NODE
     )
 
-    @time begin
-        coalition_options, coalition_profiles, profile_utilities, coalition_unanimities,
-        coalition_qualified_unanimities =
-            evaluate_party_profiles(
-                N_PARTIES, N_ISSUES, N_SEATS, POP_PER_NODE, voter_question_positions,
-                party_question_positions, voter_issue_weights, N_QUESTIONS
-            )
-    end
+    utility_maximizer_chosen, prop_vse = evaluate_proportional_election(
+        party_ideal_points, voter_question_positions, party_question_positions, voter_issue_weights,
+        preferred_parties, N_PARTIES, N_ISSUES, N_QUESTIONS, ISSUE_DIMS, N_SEATS, POP_PER_SEAT,
+        N_ITERS, SAMPLE_SIZE, RNG
+    )
 
-    profile_utilities = scale_utilities(profile_utilities)
 
-    social_utilities = sum(profile_utilities, dims=(1, 2))[:]
-    coalition_profiles = convert.(Array, coalition_profiles)
+    ## ----------------------------------------------------------------------------------------- ##
+    ##                                 MAJORITARIAN ELECTION                                     ##
+    ## ----------------------------------------------------------------------------------------- ##
 
-    begin
-        @time party_coalition_utilities =
-            ProportionalEvaluationMetrics.compute_utilities_for_party_profiles(
-                coalition_profiles, coalition_profiles, party_issue_weights, length(coalition_options),
-                1, N_PARTIES, N_ISSUES
-            )
-    end
+    @time candidates = candidate_entry(ideal_points, α, P_NORM, N_CANDIDATES, N_SEATS, POP_PER_NODE)
 
-    party_coalition_utilities = scale_utilities(party_coalition_utilities)
+    @time winning_candidates, majoritarian_voter_utilities, first_round_candidate_choices =
+        run_majoritarian_election(ideal_points, voter_issue_weights, candidates, N_SEATS,
+            N_CANDIDATES, N_ISSUES, POP_PER_NODE, ISSUE_DIMS
+        )
 
-    @time winning_coalition = ProportionalEvaluationMetrics.find_winning_coalition(N_QUESTIONS,
-        winning_parties, coalition_options, coalition_qualified_unanimities,
-        party_coalition_utilities)
+    majoritarian_voter_utilities = scale_utilities(majoritarian_voter_utilities)
+    majoritarian_rankings = ElectionSimulation.compute_voter_rankings(majoritarian_voter_utilities,
+        n_seats, pop_per_seat, n_candidates
+    )
 
-    # FIRST METRIC
-    utility_maxer_chosen = argmax(social_utilities) == winning_coalition ? 1 : 0
+    # VSE MAJORITARIAN
+    vse_by_district = evaluate_majoritarian_election(
+        voter_question_positions, voter_issue_weights, candidates, majoritarian_rankings,
+        N_ISSUES, N_SEATS, N_CANDIDATES, POP_PER_SEAT, N_QUESTIONS, winning_candidates,
+        first_round_candidate_choices, SAMPLE_SIZE, RNG, N_ITERS
+    )
 
-    # SECOND METRIC
-    prop_vse = ProportionalEvaluationMetrics.compute_vse(N_ITERS, preferred_parties, rng, N_SEATS,
-        POP_PER_SEAT, N_PARTIES, SAMPLE_SIZE, N_QUESTIONS, coalition_options,
-        coalition_qualified_unanimities, party_coalition_utilities, social_utilities,
-        winning_coalition)
+    ## ----------------------------------------------------------------------------------------- ##
+    ##                                 TANGIAN INDICES                                           ##
+    ## ----------------------------------------------------------------------------------------- ##
 
     # THIRD AND FOURTH METRICS
     tangian_indices = TangianIndices.computeTangianIndices(

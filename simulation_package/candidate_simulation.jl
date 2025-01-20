@@ -29,8 +29,8 @@ Any probability above 1.0 is capped at 1.0.
 """
 function compute_engagement(pop_issues::AbstractVector{Array{Float64,3}},
     alpha::Float64,
-    p::Float64;
-    rng=MersenneTwister(42))
+    p::Float64,
+    rng::AbstractRNG)
 
     # Number of issues
     M = length(pop_issues)
@@ -94,11 +94,11 @@ Returns
 """
 function entry_candidates(pop_issues::Vector{Array{Float64,3}},
     alpha::Float64,
-    p::Float64;
-    rng=MersenneTwister(42))
+    p::Float64,
+    rng::AbstractRNG)
 
     # 1) Compute engagement
-    engagement, _ = compute_engagement(pop_issues, alpha, p; rng=rng)
+    engagement, _ = compute_engagement(pop_issues, alpha, p, rng)
 
     (N, A) = size(engagement)
 

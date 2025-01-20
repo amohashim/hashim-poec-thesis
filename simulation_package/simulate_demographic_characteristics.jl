@@ -2,9 +2,7 @@ module ExogeneousDemographicCharacteristics
 
 using Distributions, Random
 
-export get_base_probabilities_low, get_base_probabilities_medium_nominal
-export get_base_probabilities_medium_ordinal, get_base_probabilities_high
-export get_base_probabilities_perfect, generate_state_level_probabilities
+export generate_state_level_probabilities
 
 # Function to generate state-level probabilities for Low Homogeneity
 function get_base_probabilities_low(n_categories::Int64)
@@ -116,6 +114,31 @@ function generate_state_level_probabilities(homogeneity::Symbol, characteristic_
     end
 end
 
+"""
+Vector of vectors of equal length; each vector is the distribution for a given demographic
+characteristic
+"""
+function generate_statewide_distributions(homogeneity::AbstractVector{Symbol},
+    characteristic_type::AbstractVector{Symbol}, n_groups::AbstractVector{Int},
+)::Vector{Vector{Float64}}
+
+    max_groups = maximum(n_groups)
+    begin
+        statewide_distributions =
+            ExogeneousDemographicCharacteristics.generate_state_level_probabilities.(
+                homogeneity, characteristic_type, n_groups
+            )
+    end
+
+    statewide_distributions = map(
+        dist -> vcat(dist, zeros(max_groups - length(dist))), statewide_distributions
+    )
+
+
+    return statewide_distributions
+
+end
+
 end
 
 module EndogeneousDemogprahicCharacteristics
@@ -142,8 +165,8 @@ Simuialtes `num_agent` demographic characteristic for all voters in a state (gra
         where:
         - Each entry corresponds to the group of an agent for a specific characteristic.
 """
-function simulate_voter_demographics(node_dists::Array{Float64,3}, num_agents::Int64;
-    rng::AbstractRNG=MersenneTwister(42))
+function simulate_voter_demographics(node_dists::Array{Float64,3}, num_agents::Int64,
+    rng::AbstractRNG)
 
     N, J, K = size(node_dists)  # Dimensions: nodes (districts), characteristics, groups
     agents = Array{Int64}(undef, N, num_agents, J)  # Preallocate storage
@@ -165,9 +188,6 @@ function simulate_voter_demographics(node_dists::Array{Float64,3}, num_agents::I
 
     return agents
 end
-
-using StaticArrays
-using Random
 
 # salience table for population of 10,000, 
 function precompute_salience_lookup_table(salience_probs::SMatrix{J,4,Float64}) where {J}
@@ -220,8 +240,8 @@ Here, agents[1,1,j,:] gives a vector with the following info:
 function simulate_agents_with_salience(
     node_dists::Array{Float64,3},
     salience_lookup::SMatrix{J,10,Int64},
-    num_agents::Int64;
-    rng::AbstractRNG=MersenneTwister(42)
+    num_agents::Int64,
+    rng::AbstractRNG
 ) where {J}
 
     N, _, K = size(node_dists)
@@ -297,7 +317,7 @@ for node in 1:N, char in 1:J
     node_dists[node, char, :] /= sum(node_dists[node, char, :])  # Normalize
 end
 
-simulate_agents_with_salience(node_dists, salience_lookup_static, num_agents; rng=rng)
+simulate_agents_with_salience(node_dists, salience_lookup_static, num_agents, rng)
 
 end
 
