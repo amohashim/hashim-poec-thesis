@@ -5,7 +5,9 @@ using LinearAlgebra
 using Statistics
 using Distances
 
-function generate_cluster_centers(K::Int, sigma_c_prime::Float64, rng::MersenneTwister; max_tries::Int=10000)
+export generate_spatial_characteristics
+
+function generate_cluster_centers(K::Int, sigma_c_prime::Float64, rng::AbstractRNG; max_tries::Int=10000)
     centers = Matrix{Float64}(undef, K, 2)
     found = 0
     tries_count = 0
@@ -32,7 +34,7 @@ function generate_cluster_centers(K::Int, sigma_c_prime::Float64, rng::MersenneT
     return centers
 end
 
-function place_nodes(N::Int, U::Float64, centers::Matrix{Float64}, sigma_c::Float64, rng::MersenneTwister)
+function place_nodes(N::Int, U::Float64, centers::Matrix{Float64}, sigma_c::Float64, rng::AbstractRNG)
     coords = zeros(Float64, N, 2)
     is_urban = fill(false, N)
     K = size(centers, 1)
@@ -104,7 +106,7 @@ function build_node_distributions(
     coords::AbstractMatrix{Float64},
     statewide_probs::AbstractVector{Vector{Float64}},
     A_values::AbstractVector{Float64},
-    rng::MersenneTwister;
+    rng::AbstractRNG;
     alpha::Float64=1.0,
     beta::Float64=1.0,
     center_and_scale::Bool=true
@@ -173,6 +175,29 @@ function build_node_distributions(
     end
 
     return node_dists
+end
+
+"""
+Array with the following dimensions:
+N x C x d_max
+
+where N is the number of districts, C is the number of charactersitics, and d_max is the maximum
+number of groups
+
+"""
+function generate_spatial_characteristics(n_metros::Int, spatial_dispersion::Float64,
+    n_seats::Int, urbanization::Float64, urban_sprawl::Float64, a_vals::AbstractVector{Float64},
+    statewide_distributions::Vector{Vector{Float64}}, rng::AbstractRNG
+)::Array{Float64,3}
+
+    centers = SpatialCharacteristics.generate_cluster_centers(n_metros, spatial_dispersion, rng)
+    coords, is_urban = SpatialCharacteristics.place_nodes(n_seats, urbanization, centers,
+        urban_sprawl, rng)
+    node_dists = SpatialCharacteristics.build_node_distributions(coords, statewide_distributions,
+        a_vals, rng)
+
+    return node_dists
+
 end
 
 

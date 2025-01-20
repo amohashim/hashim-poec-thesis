@@ -7,7 +7,9 @@ using Distributions
 using StaticArrays
 using Statistics
 
-export sample_theta, generate_theta, generate_ideal_points
+using ..HelpfulFunctions
+
+export sample_theta, generate_theta, generate_ideal_points, generate_scaled_ideal_points
 
 """
     map_salience_to_interval(salience_level::Int) => (Float64, Float64)
@@ -123,8 +125,8 @@ function generate_points_masked!(
     sigma_low::Float64,
     sigma_mod::Float64,
     sigma_high::Float64,
-    d::Int;
-    rng::AbstractRNG=MersenneTwister(0)
+    d::Int,
+    rng::AbstractRNG
 )
     @assert ndims(agents) == 4 "agents must be 4D: (N, num_agents, J, 3)"
     @assert size(Theta, 2) == d "Theta must have 'd' columns"
@@ -200,6 +202,45 @@ function generate_points_masked!(
 end
 
 generate_ideal_points = generate_points_masked!
+
+"""
+Returns: 
+1. Vector of 3D arrays with dimensions N x A x d_I, where d_I is the dimension of the issue I
+2. Vector of means of ideal points in each dimension in each issue space
+3. Vector of variances of ideal points in each dimension of each issue space
+
+"""
+function generate_scaled_ideal_points(demographic_cleavage_salience::AbstractMatrix{Int},
+    n_characteristics::Int, n_groups::AbstractVector{Int}, n_issues::Int,
+    issue_dimensions::AbstractVector{Int}, voters::Array{Int,4}, σ_none::Float64, σ_low::Float64,
+    σ_moderate::Float64, σ_high::Float64, rng::AbstractRNG
+)
+
+    ideal_points_per_issue = Vector{Array{Float64,3}}(undef, n_issues)
+    max_n_groups = maximum(n_groups)
+
+
+    for issue in 1:n_issues
+
+        θ = SimulateIssuePreferences.generate_theta(
+            demographic_cleavage_salience[:, issue], n_characteristics, max_n_groups,
+            issue_dimensions[issue], rng
+        )
+
+        ideal_points_per_issue[issue] = SimulateIssuePreferences.generate_ideal_points(
+            voters, θ, σ_none, σ_low, σ_moderate, σ_high, issue_dimensions[issue], rng
+        )
+
+    end
+
+    results = HelpfulFunctions.z_scale_points.(ideal_points_per_issue)
+
+    ideal_points_scaled, scaled_means, scaled_variances = map(x -> getindex.(results, x), 1:3)
+
+    return ideal_points_scaled, scaled_means, scaled_variances
+
+end
+
 
 end
 
@@ -433,48 +474,11 @@ using StatsBase
 export z_scale_points_for_tangian,
     build_tangian_questions_oneissue,
     build_tangian_questions_multiissue,
-    simulate_tangian_questions_chunked!
+    simulate_tangian_questions_chunked!,
+    generate_question_positions,
+    map_voters_to_positions!
 
 ################################################################################
-"""
-    z_scale_points_for_tangian(points::Array{Float64,3})
-        -> (scaled::Array{Float64,3}, means::Vector{Float64}, stds::Vector{Float64})
-
-Z-scale the 3D array (N, A, d) across the d dimensions, 
-flattening N*A as needed. Return (scaled, means, stds).
-
-** For a given issue **
-"""
-function z_scale_points_for_tangian(points::Array{Float64,3})
-    @assert ndims(points) == 3
-    N, A, d = size(points)
-    bigN = N * A
-
-    # Flatten to (bigN, d)
-    mat_2d = reshape(points, bigN, d)
-    scaled_2d = copy(mat_2d)
-    means = Vector{Float64}(undef, d)
-    stds = Vector{Float64}(undef, d)
-
-    @inbounds for j in 1:d
-        col_j = @view scaled_2d[:, j]
-        m_j = mean(col_j)
-        s_j = std(col_j)
-        means[j] = m_j
-        stds[j] = (s_j < 1e-12) ? 1.0 : s_j
-        @inbounds for i in 1:bigN
-            col_j[i] = (col_j[i] - m_j) / stds[j]
-        end
-    end
-    scaled_3d = reshape(scaled_2d, N, A, d)
-
-    means = [mean(scaled_3d[:, :, dim]) for dim in 1:d]
-    stds = [std(scaled_3d[:, :, dim]) for dim in 1:d]
-
-
-
-    return (scaled_3d, means, stds)
-end
 
 ################################################################################
 @propagate_inbounds function _oneD_coords(m::Int)
@@ -562,8 +566,8 @@ Q = number of Tangian questions (typically, numnber of Tangian questions in a gi
 function simulate_tangian_questions_chunked!(
     points::Array{Float64,3},
     tangian_positions::SVector{Q,AbstractMatrix{Float64}} where {Q},
-    gamma::Float64;
-    rng::AbstractRNG=MersenneTwister(0),
+    gamma::Float64,
+    rng::AbstractRNG,
     chunk_size::Int64=5000
 )::Array{Int64,3}
     @assert ndims(points) == 3 "Input `points` must be a 3D array (N, A, d)"
@@ -635,7 +639,6 @@ function simulate_tangian_questions_chunked!(
     return chosen
 end
 
-using Random
 
 """
     map_voters_to_positions!(
@@ -792,6 +795,47 @@ function map_voters_to_positions!(
     end
 
     return results
+end
+
+"""
+Vector of N x A x Q_i arrays, where Q_i is the number of questions in a given issue.
+So, question_positions[1][1,1,:] gives us the positions of agent 1 on 
+
+"""
+function generate_question_positions(issue_dimensions::AbstractVector{Int}, n_issues::Int,
+    n_questions::AbstractVector{Int64}, n_positions::AbstractVector{Int64},
+    ideal_points::AbstractVector{Array{Float64,3}},
+    gamma::Float64, n_seats::Int, pop_per_seat::Int)::Vector
+
+    available_positions = Vector{AbstractVector{AbstractMatrix{Float64}}}(undef, n_issues)
+
+    for issue in 1:n_issues
+
+        number_of_questions = n_questions[issue]
+        number_of_positions = n_positions[issue]
+        issue_dimension = issue_dimensions[issue]
+
+        q_specs = map(
+            random_dim -> (random_dim, number_of_positions),
+            rand(1:issue_dimension, number_of_questions)
+        )
+
+        available_positions[issue] = build_tangian_questions_multiissue(
+            issue_dimension, q_specs
+        )
+
+    end
+
+    available_positions = SVector{n_issues,AbstractVector{AbstractMatrix{Float64}}}(
+        available_positions
+    )
+
+    question_positions = map_voters_to_positions!(ideal_points,
+        available_positions, gamma, n_issues, n_questions, n_positions, n_seats, pop_per_seat,
+        issue_dimensions)
+
+    return question_positions
+
 end
 
 end # module

@@ -64,7 +64,7 @@ function structured_noise_generate_party_ideal_points(
     covariances::AbstractVector{Matrix{Float64}},
     n_issues::Int,
     issue_dimensions::AbstractVector{Int},
-    rng::AbstractRNG=Random.GLOBAL_RNG
+    rng::AbstractRNG
 )::AbstractVector{Matrix{Float64}}
 
     party_positions = Vector{Matrix{Float64}}(undef, n_issues)
@@ -93,50 +93,17 @@ function structured_noise_generate_party_ideal_points(
     return party_positions
 end
 
-"""
-structured_noise_parties(pop_issues, cov_mats)
+function structured_noise_generate_parties(ideal_point_means::AbstractVector{Vector{Float64}},
+    ideal_point_variances::AbstractVector{Vector{Float64}},
+    n_parties::Int, n_issues::Int, issue_dimensions::AbstractVector{Int},
+    rng::AbstractRNG)
 
-pop_issues: Vector{Array{Float64,3}}, length M
-  pop_issues[i] has shape (N, A, d_i)
-cov_mats: Vector{Vector{Vector{Float64}}}, length M
-  cov_mats[i] is length P
-  each cov_mats[i][p] is a d_i-length vector representing diag. variances
-returns: structured_parties[i] => shape (P, d_i)
-"""
-function structured_noise_parties(pop_issues::AbstractVector{Array{Float64,3}},
-    cov_mats::AbstractVector; rng=MersenneTwister(42))
-    M = length(pop_issues)
-    structured_parties = Vector{Matrix{Float64}}(undef, M)
-    for i in 1:M
-        arr = pop_issues[i]   # (N, A, d_i)
-        (N, A, d_i) = size(arr)
-        # flatten
-        flatten_i = similar(arr, N * A, d_i)
-        idx = 1
-        for n in 1:N
-            for a in 1:A
-                @inbounds begin
-                    @views flatten_i[idx, :] = arr[n, a, :]
-                    idx += 1
-                end
-            end
-        end
-        # mean
-        mean_i = vec(mean(flatten_i, dims=1))  # d_i
-        # let P = length(cov_mats[i])
-        P = length(cov_mats[i])
-        parties_i = zeros(Float64, P, d_i)
-        for p in 1:P
-            diag_vars = cov_mats[i][p]  # d_i
-            offset = Vector{Float64}(undef, d_i)
-            for k in 1:d_i
-                offset[k] = randn(rng) * sqrt(diag_vars[k])
-            end
-            parties_i[p, :] = mean_i .+ offset
-        end
-        structured_parties[i] = parties_i
-    end
-    return structured_parties
+    covariances = PartySimulation.build_covariances(ideal_point_variances, n_issues)
+    party_ideal_points = PartySimulation.structured_noise_generate_party_ideal_points(n_parties,
+        ideal_point_means, covariances, n_issues, issue_dimensions, rng
+    )
+
+    return party_ideal_points
 end
 
 """
@@ -148,7 +115,8 @@ Produces N x A matricies where rows are districts and columns are meaningless
 engagement is a matrix of floats, each entry represents an individuals' computed engagement
 is_political_class is a bit matrix, each entry represents whether an individual is political 
 """
-function compute_engagement(pop_issues::Vector{Array{Float64,3}}, alpha::Float64, p::Float64; rng=MersenneTwister(42))
+function compute_engagement(pop_issues::Vector{Array{Float64,3}}, alpha::Float64, p::Float64,
+    rng::AbstractRNG)
     M = length(pop_issues)
     # assume all have same N, A
     (N, A, dfirst) = size(pop_issues[1])
