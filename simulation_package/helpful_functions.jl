@@ -114,4 +114,29 @@ end
     return dict
 end
 
-function fi
+function filter_parties_below_threshold(raw_vote_counts::Dict{Int,Int},
+    party_vote_count_threshold::Float64, n_parties::Int,
+    proportions::Bool)
+
+    qualified_parties = filter_dict(raw_vote_counts, party_vote_count_threshold)
+
+    if proportions
+        counting_votes = sum(values(qualified_parties))
+        proportional_results = Dict(
+            party => count / counting_votes for (party, count) in raw_vote_counts
+        )
+    else
+        proportional_results = qualified_parties
+    end
+
+    @inbounds for party in 1:n_parties
+        if !haskey(proportional_results, party)
+            proportional_results[party] = proportions ? 0.0 : 0
+        end
+    end
+
+    return proportional_results
+
+end
+
+end
