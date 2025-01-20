@@ -320,4 +320,291 @@ function find_minority_government_profile(winning_parties::Dict{Int,Float64},
 
                 else
 
-                    issue_profi
+                    issue_profile[question, 1, 1] = 0.0
+
+                end
+            end
+        end
+
+        minority_govt_profile[issue] = issue_profile
+
+    end
+
+    voter_utilities_for_minority_govt = compute_utilities_for_party_profiles(
+        voter_question_positions, minority_govt_profile, voter_issue_weights, 1, n_seats,
+        pop_per_seat, n_issues)
+
+    voter_utilities_for_minority_govt = HelpfulFunctions.scale_utilities(
+        voter_utilities_for_minority_govt
+    )
+
+    return minority_govt_party, minority_govt_profile, voter_utilities_for_minority_govt
+
+end
+
+function evaluate_party_profiles(voter_question_positions::AbstractVector{Array{Float64,3}},
+    party_question_positions::AbstractVector{Array{Float64,3}},
+    voter_issue_weights::Array{Float64,3}, n_parties::Int, n_issues::Int, n_seats::Int,
+    pop_per_seat::Int, n_questions::AbstractVector{Int})
+
+    coalition_options = build_coalition_options(n_parties)
+    n_coalitions = length(coalition_options)
+    begin
+        strict_coalition_profiles, qualified_coalition_profiles, coalition_unanimities,
+        coalition_qualified_unanimities =
+            build_party_profile_options(coalition_options,
+                party_question_positions, n_issues, n_questions)
+
+    end
+
+    begin
+        strict_profile_utilities =
+            compute_utilities_for_party_profiles(
+                voter_question_positions, strict_coalition_profiles, voter_issue_weights,
+                n_coalitions, n_seats, pop_per_seat, n_issues
+            )
+    end
+
+    begin
+        qualified_profile_utilities =
+            compute_utilities_for_party_profiles(
+                voter_question_positions, qualified_coalition_profiles, voter_issue_weights,
+                n_coalitions, n_seats, pop_per_seat, n_issues
+            )
+    end
+
+    begin
+        return coalition_options, strict_coalition_profiles, qualified_coalition_profiles,
+        strict_profile_utilities, qualified_profile_utilities, coalition_unanimities,
+        coalition_qualified_unanimities
+    end
+
+end
+
+function find_eligible_condorcet_winner(voter_utilities_for_coalition_profiles::Array{Float64,3},
+    coalition_unanimities::AbstractVector{Int}, n_questions::AbstractVector{Int},
+    n_seats::Int, pop_per_seat::Int)
+
+    eligible_coalitions = find_eligible_coalitions(coalition_unanimities, n_questions)
+    eligible_coalition_profile_utilities = voter_utilities_for_coalition_profiles[
+        :, :, eligible_coalitions
+    ]
+    n_eligible_coalitions = size(eligible_coalition_profile_utilities)[3]
+
+    eligible_coalition_rankings = compute_voter_rankings(eligible_coalition_profile_utilities,
+        n_seats, pop_per_seat, n_eligible_coalitions)
+
+    eligible_coalition_rankings = reshape(
+        permutedims(eligible_coalition_rankings, (2, 1, 3)), n_seats * pop_per_seat,
+        n_eligible_coalitions
+    )
+
+    begin
+        condorcet_winner, smith_set, _ =
+            find_condorcet_and_smith_sets_for_district(eligible_coalition_rankings)
+    end
+
+    return condorcet_winner, smith_set
+
+end
+
+function determine_condorcet_or_smith(observed_winner::Int,
+    voter_utilities_for_coalition_profiles::Array{Float64,3},
+    coalition_unanimities::AbstractVector{Int}, n_questions::AbstractVector{Int},
+    n_seats::Int, pop_per_seat::Int
+)
+
+    winner_is_condorcet = false
+    winner_in_smith_set = false
+    condorcet_paradox = false
+    condorcet_winner, smith_set = find_eligible_condorcet_winner(
+        voter_utilities_for_coalition_profiles, coalition_unanimities, n_questions, n_seats,
+        pop_per_seat
+    )
+
+    if observed_winner != 0 # if not minority govt
+        if observed_winner ∈ smith_set
+            winner_in_smith_set = true
+            if isnothing(condorcet_winner)
+                condorcet_paradox = true
+            elseif observed_winner == condorce_winner
+                winner_is_condorcet = true
+            end
+        end
+    else
+        if isnothing(condorcet_winner)
+            condorcet_paradox = true
+        end
+    end
+
+    return winner_is_condorcet, winner_in_smith_set, condorcet_paradox
+
+end
+
+function determine_utility_metrics(observed_winner::Int, social_utilities::Vector{Float64})
+
+    @assert observed_winner != 0
+
+    utility_maxer_elected = false
+
+    utility_of_winner = social_utilities[observed_winner]
+    utility_of_util_maxer, util_maxer = findmax(social_utilities)
+
+    if (observed_winner == util_maxer) || (utility_of_winner == utility_of_util_maxer)
+
+        utility_maxer_elected = true
+
+    end
+
+    utility_efficiency = utility_of_winner / utility_of_util_maxer
+
+    return utility_of_winner, utility_efficiency, utility_maxer_elected
+
+end
+
+function determine_proportional_metrics(coalition_options::Vector{Vector{Int}},
+    coalition_profiles::AbstractVector{Array{Float64,3}},
+    party_utilities_for_coalitions::Array{Float64,3},
+    voter_utilities_for_coalition_profiles::Array{Float64,3},
+    social_utilities::Vector{Float64},
+    coalition_unanimities::Vector{Int},
+    voter_issue_weights::Array{Float64,3},
+    voter_question_positions::AbstractVector{Array{Float64,3}},
+    winning_parties::Dict{Int,Float64},
+    n_issues::Int, n_questions::AbstractVector{Int}, n_seats::Int, pop_per_seat::Int,
+    n_parties::Int, strict::Bool)
+
+    minority_govt_elected = false
+
+    observed_winner = find_winning_coalition(coalition_options, party_utilities_for_coalitions,
+        coalition_unanimities, winning_parties, n_questions)
+    unanimity = observed_winner == 0 ? 0 : coalition_unanimities[observed_winner]
+
+    begin
+        winner_is_condorcet, winner_in_smith_set, condorcet_paradox =
+            determine_condorcet_or_smith(
+                observed_winner, voter_utilities_for_coalition_profiles,
+                coalition_unanimities, n_questions, n_seats, pop_per_seat
+            )
+    end
+
+    if observed_winner == 0
+
+        begin
+            _, minority_govt_profile, voter_utilities_for_minority_govt_profile =
+                find_minority_government_profile(
+                    winning_parties, coalition_profiles,
+                    voter_issue_weights, voter_question_positions, n_issues, n_questions, n_seats,
+                    pop_per_seat, n_parties, strict
+                )
+        end
+
+        social_utility = sum(voter_utilities_for_minority_govt_profile)
+        minority_utils = [social_utilities; social_utility]
+        non_zero_positions = count(!iszero, vcat(minority_govt_profile...))
+        median_position = median(vcat(minority_govt_profile...))
+
+        begin
+            utility_of_winner, utility_efficiency, utility_maxer_elected =
+                determine_utility_metrics(length(social_utilities) + 1, minority_utils)
+        end
+
+        minority_govt_elected = true
+
+    else
+
+        utility_of_winner, utility_efficiency, utility_maxer_elected = determine_utility_metrics(
+            observed_winner, social_utilities
+        )
+
+        non_zero_positions = count(!iszero, vcat(minority_govt_profile...)[:, :, observed_winner])
+        median_positions = median(vcat(coalition_profiles...)[:, :, observed_winner])
+
+    end
+
+    indicators = [
+        winner_is_condorcet, winner_in_smith_set, condorcet_paradox,
+        utility_maxer_elected, minority_govt_elected
+    ]
+
+    prop_eval_measures = ProportionalEvalMeasures(utility_of_winner, utility_efficiency,
+        non_zero_positions, median_positions, unanimity, n_seats)
+    pop_eval_indicators = ProportionalEvalIndicators(indicators...)
+
+    return prop_eval_measures, pop_eval_indicators
+
+end
+
+function evaluate_proportional_election(
+    party_ideal_points::AbstractVector{Array{Float64,3}},
+    voter_question_positions::AbstractVector{Array{Float64,3}},
+    party_question_positions::AbstractVector{Array{Float64,3}},
+    voter_issue_weights::Array{Float64,3},
+    winning_parties::Dict{Int,Float64},
+    n_parties::Int, n_issues::Int, n_questions::AbstractVector{Int},
+    issue_dimensions::AbstractVector{Int},
+    n_seats::Int, pop_per_seat::Int) # winning parties should be true, over-threshold winning parties
+
+    party_issue_weights = find_issue_weights(party_ideal_points, n_issues, 1, n_parties,
+        issue_dimensions)
+
+    begin
+        coalition_options, strict_coalition_profiles, qualified_coalition_profiles,
+        voter_utilities_for_strict_coalition_profile,
+        voter_utilities_for_qualified_coalition_profile, coalition_unanimities,
+        coalition_qualified_unanimities = evaluate_party_profiles(
+            voter_question_positions, party_question_positions, voter_issue_weights, n_parties,
+            n_issues, n_seats, pop_per_seat, n_questions
+        )
+    end
+
+    strict_coalition_profiles = convert.(Array, strict_coalition_profiles) # profiles of each coalition on each issue
+    qualified_coalition_profiles = convert.(Array, qualified_coalition_profiles)
+
+    voter_utilities_for_strict_coalition_profile = scale_utilities(
+        voter_utilities_for_strict_coalition_profile
+    )
+    strict_social_utilities = sum(voter_utilities_for_strict_coalition_profile, dims=(1, 2))[:]
+
+    voter_utilities_for_qualified_coalition_profile = scale_utilities(
+        voter_utilities_for_qualified_coalition_profile
+    )
+    qualified_social_utilities = sum(
+        voter_utilities_for_qualified_coalition_profile, dims=(1, 2)
+    )[:]
+
+    n_coalitions = length(coalition_options)
+
+    party_utilities_for_strict_coalition_profiles = compute_utilities_for_party_profiles(
+        party_question_positions, strict_coalition_profiles, party_issue_weights, n_coalitions, 1,
+        n_parties, n_issues
+    ) # each party's utility from a given coalition
+    party_utilities_for_qualified_coalition_profiles = compute_utilities_for_party_profiles(
+        party_question_positions, qualified_coalition_profiles, party_issue_weights, n_coalitions, 1,
+        n_parties, n_issues
+    ) # each party's utility from a given coalition
+
+    utils_strict, indicators_strict = determine_proportional_metrics(
+        coalition_options, strict_coalition_profiles, party_utilities_for_strict_coalition_profiles,
+        voter_utilities_for_strict_coalition_profile, strict_social_utilities,
+        coalition_unanimities, voter_issue_weights, voter_question_positions, winning_parties,
+        n_issues, n_questions, n_seats, pop_per_seat, n_parties, true
+    )
+
+    utils_qualified, indicators_qualified = determine_proportional_metrics(
+        coalition_options, qualified_coalition_profiles,
+        party_utilities_for_qualified_coalition_profiles,
+        voter_utilities_for_qualified_coalition_profile, qualified_social_utilities,
+        coalition_qualified_unanimities, voter_issue_weights, voter_question_positions,
+        winning_parties, n_issues, n_questions, n_seats, pop_per_seat, n_parties, false
+    )
+
+    return ProportionalEvaluation(
+        indicators_qualified, utils_qualified, indicators_strict, utils_strict
+    )
+
+end
+
+
+end
+
