@@ -3,6 +3,7 @@ module Branch1Sequences
 export run_proportional_election_sequence, run_majoritarian_sequence
 
 using DataStructures
+using Distributions
 using Random
 using Parameters
 using StatsBase
@@ -53,21 +54,7 @@ function run_proportional_election_sequence(fixed_params::FixedParams{K},
         winning_parties = ProportionalEvaluationMetrics.allocate_by_dhondt(
             n_seats, proportional_results
         )
-        # counts = counter(preferred_parties)
-        # qualified_parties = filter_dict(Dict(counts), min_vote_count)
-        # counting_votes = sum(values(qualified_parties))
-
-        # proportional_results = Dict(
-        #     party => count / counting_votes for (party, count) in counts
-        # )
-
-        # for party in 1:n_parties
-        #     if !haskey(proportional_results, party)
-        #         proportional_results[party] = 0.0
-        #     end
-        # end
-
-        return winning_parties
+        return winning_parties, raw_vote_counts
 
     end
 
@@ -92,30 +79,26 @@ function run_proportional_election_sequence(fixed_params::FixedParams{K},
         issue_dimensions
     )
 
-    party_issue_weights = HelpfulFunctions.find_issue_weights(party_ideal_points,
-        n_issues, 1, n_parties, issue_dimensions
-    )
-
     party_question_positions = SimulateQuestionPreferences.generate_question_positions(
         issue_dimensions, n_issues, n_questions, n_positions, party_ideal_points, gamma, 1,
         n_parties
     )
 
-    winning_parties = run_proportional_election(preferred_parties, n_seats,
+    winning_parties, raw_vote_counts = run_proportional_election(preferred_parties, n_seats,
         pop_per_seat, party_threshold, n_parties)
 
-    begin
+    @time begin
         prop_eval_metrics =
             ProportionalEvaluationMetrics.evaluate_proportional_election(
                 party_ideal_points, voter_question_positions, party_question_positions,
-                voter_issue_weights, winning_parties, n_parties,
+                voter_issue_weights, winning_parties, raw_vote_counts, n_parties,
                 n_issues, n_questions, issue_dimensions, n_seats, pop_per_seat
             )
     end
 
-    tangian_inputs = voter_question_positions, winning_parties
+    tangian_inputs = party_question_positions, winning_parties, n_parties
 
-    return prop_eval_metrics, tangian_inputs
+    return prop_eval_metrics, tangian_inputs, preferred_parties
 end
 
 function run_majoritarian_sequence(fixed_params::FixedParams{K},
@@ -123,22 +106,65 @@ function run_majoritarian_sequence(fixed_params::FixedParams{K},
     question_structure::QuestionStructure{J}, representative_params::RepresentativesParams,
     ideal_points::AbstractVector{Array{Float64,3}},
     voter_question_positions::AbstractVector{Array{Float64,3}},
-    voter_issue_weights::Array{Float64,3}
+    voter_issue_weights::Array{Float64,3}, preferred_parties::Matrix{Int}
 ) where {K,J}
 
+    @inline function enforce_n_candidates(entry_vector::BitVector, n_candidates::Int)
+
+        count_ones = count(bit -> bit == 1, entry_vector)
+
+        if count_ones > n_candidates
+            # Indices of all 1's in the BitVector
+            ones_indices = findall(x -> x == 1, entry_vector)
+            # Randomly select indices to turn to 0
+            to_flip = rand(ones_indices, count_ones - n_candidates)
+            # Turn those indices to 0
+            entry_vector[to_flip] .= 0
+        elseif count_ones < n_candidates
+            # Indices of all 0's in the BitVector
+            zeros_indices = findall(x -> x == 0, entry_vector)
+            # Randomly select indices to turn to 1
+            to_flip = rand(zeros_indices, n_candidates - count_ones)
+            # Turn those indices to 1
+            entry_vector[to_flip] .= 1
+        end
+
+        return entry_vector
+
+    end
+
     @inline function candidate_entry(ideal_points::AbstractVector{Array{Float64,3}}, α::Float64,
-        p_norm::Float64, n_candidates::Int, n_seats::Int, pop_per_seat::Int, rng::AbstractRNG
+        p_norm::Float64, n_candidates::Int, n_seats::Int, pop_per_seat::Int, α_entry::Float64,
+        rng::AbstractRNG
     )
 
-        _, is_political_class = CandidateSimulation.compute_engagement(
+        engagement_matrix, is_political_class = CandidateSimulation.compute_engagement(
             ideal_points, α, p_norm, rng
         )
+
+        engagement_matrix = scale_utilities(engagement_matrix) # scale to [0,1]
         candidate_indices = Vector{Vector{Int}}(undef, n_seats)
 
         @inbounds for seat in 1:n_seats
 
-            local_indices = collect(1:pop_per_seat)[@view is_political_class[seat, :]]
-            candidate_indices[seat] = sample(rng, local_indices, n_candidates)
+            engagements = @view engagement_matrix[seat, :]
+            political_class_indices = collect(1:pop_per_seat)[@view is_political_class[seat, :]]
+            probs = α_entry .* engagements
+            for (i, prob) in enumerate(probs)
+                if prob > 1.0
+                    probs[i] = 1.0
+                end
+
+                if !(i ∈ political_class_indices)
+                    probs[i] = 0.0
+                end
+            end
+
+            candidate_enters = rand.(Bernoulli.(probs))
+            candidate_enters = enforce_n_candidates(candidate_enters, n_candidates)
+            local_indices = collect(1:pop_per_seat)[candidate_enters]
+
+            candidate_indices[seat] = sample(rng, local_indices, n_candidates, replace=false)
 
         end
 
@@ -174,29 +200,29 @@ function run_majoritarian_sequence(fixed_params::FixedParams{K},
     @unpack n_issues, issue_dimensions = issue_structure
     @unpack n_questions = question_structure
     @unpack n_candidates = branch_params
-    @unpack α_political_class, p_norm = representative_params
+    @unpack α_political_class, p_norm, α_candidate_entry = representative_params
 
     candidates = candidate_entry(ideal_points, α_political_class, p_norm, n_candidates, n_seats,
-        pop_per_seat, rng)
+        pop_per_seat, α_candidate_entry, rng)
 
-    winning_candidates, majoritarian_voter_utilities, first_round_candidate_choices =
+    @time winning_candidates, voter_utilities_for_candidates, first_round_candidate_choices =
         run_majoritarian_election(ideal_points, voter_issue_weights, candidates, n_seats,
             n_candidates, n_issues, pop_per_seat, issue_dimensions
         )
 
-    majoritarian_voter_utilities = HelpfulFunctions.scale_utilities(majoritarian_voter_utilities)
-    majoritarian_rankings = ElectionSimulation.compute_voter_rankings(majoritarian_voter_utilities,
-        n_seats, pop_per_seat, n_candidates
+    voter_utilities_for_candidates = HelpfulFunctions.scale_utilities(
+        voter_utilities_for_candidates
     )
 
     # VSE MAJORITARIAN
-    average_results = MajoritarianEvaluationMetrics.evaluate_majoritarian_election(
-        voter_question_positions, voter_issue_weights, candidates, majoritarian_rankings,
-        n_issues, n_seats, n_candidates, pop_per_seat, n_questions, winning_candidates,
-        first_round_candidate_choices, sample_size, n_iterations, rng
+    @time maj_evaluation = MajoritarianEvaluationMetrics.evaluate_majoritarian_election(
+        voter_question_positions, voter_issue_weights, candidates, winning_candidates,
+        voter_utilities_for_candidates, preferred_parties, n_seats, pop_per_seat, n_issues,
+        n_questions, n_candidates
     )
 
-    return average_results
+    tangian_inputs = winning_candidates
+    return maj_evaluation, tangian_inputs
 
 end
 

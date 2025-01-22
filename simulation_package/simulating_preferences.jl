@@ -482,7 +482,9 @@ export z_scale_points_for_tangian,
 
 ################################################################################
 @propagate_inbounds function _oneD_coords(m::Int)
-    if m == 3
+    if m == 2
+        return [-2.0, 2.0]
+    elseif m == 3
         # [-2, 0, 2]
         return [-2.0, 0.0, 2.0]
     elseif m == 5

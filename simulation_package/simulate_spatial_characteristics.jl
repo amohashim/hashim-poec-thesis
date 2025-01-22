@@ -5,7 +5,20 @@ using LinearAlgebra
 using Statistics
 using Distances
 
-export generate_spatial_characteristics
+export SpatialAutocorrelationMeasurement, generate_spatial_characteristics
+export district_entropies, compute_mantel_spatial_correlation
+
+struct SpatialAutocorrelationMeasurement
+
+    aggregated_distance_corr::Float64
+    aggregate_distance_corr_p_val::Float64
+    characteristic_level_corr::Vector{Float64}
+    char_level_corr_p_val::Vector{Float64}
+    average_entropies::Vector{Float64} # averaged over districts, for each characteristic
+    median_entropies::Vector{Float64}
+    sd_entropies::Vector{Float64}
+
+end
 
 function generate_cluster_centers(K::Int, sigma_c_prime::Float64, rng::AbstractRNG; max_tries::Int=10000)
     centers = Matrix{Float64}(undef, K, 2)
@@ -181,6 +194,8 @@ end
 Array with the following dimensions:
 N x C x d_max
 
+coords is an N x 2 matrix
+
 where N is the number of districts, C is the number of charactersitics, and d_max is the maximum
 number of groups
 
@@ -188,15 +203,17 @@ number of groups
 function generate_spatial_characteristics(n_metros::Int, spatial_dispersion::Float64,
     n_seats::Int, urbanization::Float64, urban_sprawl::Float64, a_vals::AbstractVector{Float64},
     statewide_distributions::Vector{Vector{Float64}}, rng::AbstractRNG
-)::Array{Float64,3}
+)
 
     centers = SpatialCharacteristics.generate_cluster_centers(n_metros, spatial_dispersion, rng)
     coords, is_urban = SpatialCharacteristics.place_nodes(n_seats, urbanization, centers,
         urban_sprawl, rng)
     node_dists = SpatialCharacteristics.build_node_distributions(coords, statewide_distributions,
         a_vals, rng)
+    adjacency = build_adjacency(coords; delta=0.2)
 
-    return node_dists
+
+    return node_dists, coords
 
 end
 
@@ -217,267 +234,245 @@ end
 
 test_spatial_fourthpass()
 
-end
-
-module TestSpatialCharacteristics
-
-using Random
-using LinearAlgebra
 using Statistics
-using Distances
-using DataFrames
-using CSV
+using Random
 
-# Compute Moran's I
-function compute_spatial_autocorrelation(values::Vector{Float64}, adjacency::Matrix{Float64})
-    """
-    Computes Moran's I based on an adjacency matrix.
-    """
-    N = size(adjacency, 1)
-    w = adjacency ./ sum(adjacency, dims=2)  # Normalize row sums
-    mean_val = mean(values)
-    dev = values .- mean_val
-
-    # Numerator and denominator
-    num = sum(adjacency[i, j] * dev[i] * dev[j] for i in 1:N, j in 1:N)
-    denom = sum(dev .^ 2)
-
-    return (N / sum(adjacency)) * (num / denom)
-end
-
-# Generate a single map
-function generate_single_map(N, K, U, sigma_c, sigma_c_prime, delta, statewide_probs, A_values, rng, alpha, beta)
-    centers = generate_cluster_centers(K, sigma_c_prime, rng)
-    coords, is_urban = place_nodes(N, U, centers, sigma_c, rng)
-    adjacency = build_adjacency(coords; delta=delta)
-    node_dists = build_node_distributions(coords, statewide_probs, A_values, rng; alpha=alpha, beta=beta)
-    return adjacency, node_dists
-end
-
-function compute_entropy(probabilities::Vector{Float64})
-    # Compute entropy: H = -sum(p * log(p)) for p > 0
-    return -sum(p * log(p + 1e-12) for p in probabilities)
-end
-
-function compute_spatial_autocorrelation(values::Vector{Float64}, adjacency::Matrix{Float64})
-    """
-    Computes Moran's I based on an adjacency matrix.
-    """
-    N = size(adjacency, 1)
-    w = adjacency ./ sum(adjacency, dims=2)  # Normalize row sums
-    mean_val = mean(values)
-    dev = values .- mean_val
-
-    # Numerator and denominator
-    num = sum(adjacency[i, j] * dev[i] * dev[j] for i in 1:N, j in 1:N)
-    denom = sum(dev .^ 2)
-
-    return (N / sum(adjacency)) * (num / denom)
-end
-
-# Bootstrap Moran's I
-function bootstrap_morans_I(N, K, U, sigma_c, sigma_c_prime, delta, statewide_probs, A_values, rng; alpha=1.0, beta=1.0, n_bootstrap=100)
-    morans_I_samples = Float64[]
-
-    for _ in 1:n_bootstrap
-        adjacency, node_dists = generate_single_map(N, K, U, sigma_c, sigma_c_prime, delta, statewide_probs, A_values, rng, alpha, beta)
-        values = node_dists[:, 1, 2]  # Extract values for Moran's I computation
-        push!(morans_I_samples, compute_spatial_autocorrelation(values, adjacency))
-    end
-
-    mean_I = mean(morans_I_samples)
-    median_I = median(morans_I_samples)
-    std_I = std(morans_I_samples)
-
-    return mean_I, median_I, std_I
-end
-
-function bootstrap_entropy_morans_I(N, K, U, sigma_c, sigma_c_prime, delta, statewide_probs, A_values, rng; alpha=1.0, beta=1.0, n_bootstrap=100)
-    morans_I_samples = Float64[]
-
-    for _ in 1:n_bootstrap
-        adjacency, node_dists = generate_single_map(N, K, U, sigma_c, sigma_c_prime, delta, statewide_probs, A_values, rng, alpha, beta)
-
-        # Compute entropy for each node
-        entropies = [compute_entropy(node_dists[i, 1, :]) for i in 1:N]
-
-        # Compute Moran's I for the entropies
-        push!(morans_I_samples, compute_spatial_autocorrelation(entropies, adjacency))
-    end
-
-    mean_I = mean(morans_I_samples)
-    median_I = median(morans_I_samples)
-    std_I = std(morans_I_samples)
-
-    return mean_I, median_I, std_I
-end
-
-function run_combinations_with_entropy()
-    # Parameters
-    N = 200
-    K = 3
-    sigma_c = 0.05
-    sigma_c_prime = 0.15
-    statewide_probs = [[0.4, 0.3, 0.3]]
-    n_bootstrap = 100
-    rng = MersenneTwister(123)
-
-    U_values = [0.9, 0.6, 0.3]
-    A_j_values = [0.0, 0.5, 1.0]
-    alpha_values = [0.0, 0.25, 0.5, 0.75, 1.0]
-    threshold_values = [0.05]
-
-    combinations = [(U, A_j, alpha, threshold) for U in U_values, A_j in A_j_values, alpha in alpha_values, threshold in threshold_values]
-
-    results = DataFrame(U=Float64[], A_j=Float64[], alpha=Float64[], threshold=Float64[], mean_I=Float64[], median_I=Float64[], std_I=Float64[])
-
-    for (U, A_j, alpha, threshold) in combinations
-        println("Running combination U=$U, A_j=$A_j, alpha=$alpha, threshold=$threshold")
-        mean_I, median_I, std_I = bootstrap_entropy_morans_I(
-            N, K, U, sigma_c, sigma_c_prime, threshold, statewide_probs, [A_j], rng; alpha=alpha, beta=1.0, n_bootstrap=n_bootstrap
-        )
-        push!(results, (U, A_j, alpha, threshold, mean_I, median_I, std_I))
-    end
-
-    # Save results
-    CSV.write("bootstrap_entropy_morans_I_results.csv", results)
-    println("Results saved to 'bootstrap_entropy_morans_I_results.csv'")
-end
-
-function run_combinations()
-    # Parameters
-    N = 100
-    K = 3
-    sigma_c = 0.05
-    sigma_c_prime = 0.15
-    statewide_probs = [[0.4, 0.3, 0.3]]
-    n_bootstrap = 100
-    rng = MersenneTwister(123)
-
-    U_values = [0.9, 0.6, 0.3]
-    A_j_values = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
-    alpha_values = [0.0, 0.25, 0.5, 0.75, 1.0]
-    threshold_values = [0.05, 0.1, 0.2, 0.3]
-
-    combinations = [(U, A_j, alpha, threshold) for U in U_values, A_j in A_j_values, alpha in alpha_values, threshold in threshold_values]
-
-    results = DataFrame(U=Float64[], A_j=Float64[], alpha=Float64[], threshold=Float64[], mean_I=Float64[], median_I=Float64[], std_I=Float64[])
-
-    for (U, A_j, alpha, threshold) in combinations
-        println("Running combination U=$U, A_j=$A_j, alpha=$alpha, threshold=$threshold")
-        mean_I, median_I, std_I = bootstrap_morans_I(
-            N, K, U, sigma_c, sigma_c_prime, threshold, statewide_probs, [A_j], rng; alpha=alpha, beta=1.0, n_bootstrap=n_bootstrap
-        )
-        push!(results, (U, A_j, alpha, threshold, mean_I, median_I, std_I))
-    end
-
-    # Save results
-    CSV.write("bootstrap_morans_I_results.csv", results)
-    println("Results saved to 'bootstrap_morans_I_julia_results.csv'")
-end
-
-function jensen_shannon_divergence(p::Vector{Float64}, q::Vector{Float64})
-    m = 0.5 * (p .+ q)
-    return 0.5 * sum(p .* log.(p ./ (m .+ 1e-12) .+ 1e-12)) +
-           0.5 * sum(q .* log.(q ./ (m .+ 1e-12) .+ 1e-12))
-end
-
-function compute_distance_correlation(spatial_distances::Matrix{Float64}, distributional_distances::Matrix{Float64})
-    N = size(spatial_distances, 1)
-    spatial_vector = []
-    distributional_vector = []
-
-    for i in 1:N
-        for j in i+1:N
-            push!(spatial_vector, spatial_distances[i, j])
-            push!(distributional_vector, distributional_distances[i, j])
+# 1) KL-divergence helper for Jensen-Shannon
+@inline function _kl_divergence(p::AbstractVector{Float64},
+    q::AbstractVector{Float64})::Float64
+    s = 0.0
+    @inbounds for k in 1:length(p)
+        pk = p[k]
+        if pk > 0
+            qk = q[k]
+            @assert qk > 0.0 "Encountered nonzero p[k] with zero M[k]."
+            s += pk * log(pk / qk)
         end
     end
-
-    return cor(spatial_vector, distributional_vector)
+    return s
 end
 
-function generate_distance_matrices(coords::Matrix{Float64}, node_dists::Array{Float64,3}, m::Vector{Float64})
+# 2) Jensen-Shannon Divergence for probability vectors
+@inline function jensen_shannon(p::AbstractVector{Float64},
+    q::AbstractVector{Float64})::Float64
+    @assert length(p) == length(q)
+    len = length(p)
+    M = Vector{Float64}(undef, len)
+    @inbounds for i in 1:len
+        M[i] = 0.5 * (p[i] + q[i])
+    end
+    return 0.5 * _kl_divergence(p, M) + 0.5 * _kl_divergence(q, M)
+end
+
+# 3) Pairwise Euclidean distances on N×2 coords
+function compute_spatial_distance(coords::Matrix{Float64})
+    @assert size(coords, 2) == 2 "coords must be N×2"
     N = size(coords, 1)
-
-    # Spatial distances
-    spatial_distances = pairwise(Euclidean(), coords')
-
-    # Distributional distances (JSD)
-    distributional_distances = Matrix{Float64}(undef, N, N)
+    Dgeo = Matrix{Float64}(undef, N, N)
     @inbounds for i in 1:N
-        distributional_distances[i, i] = 0.0  # JSD for same node
+        Dgeo[i, i] = 0.0
+        xi, yi = coords[i, 1], coords[i, 2]
         for j in i+1:N
-            p_i, p_j = node_dists[i, 1, :], node_dists[j, 1, :]
-            @. m = 0.5 * (p_i + p_j)
-            distance = 0.5 * sum(p_i .* log.(p_i ./ m .+ 1e-12)) +
-                       0.5 * sum(p_j .* log.(p_j ./ m .+ 1e-12))
-            distributional_distances[i, j] = distance
-            distributional_distances[j, i] = distance  # Symmetric
+            xj, yj = coords[j, 1], coords[j, 2]
+            dx = xi - xj
+            dy = yi - yj
+            dist = sqrt(dx * dx + dy * dy)
+            Dgeo[i, j] = dist
+            Dgeo[j, i] = dist
+        end
+    end
+    return Dgeo
+end
+
+# 4) Compute per-characteristic distance matrices and an aggregated matrix
+function compute_demo_distances(
+    district_dists::Array{Float64,3},
+    n_groups::AbstractVector{Int},
+    metric::Function=jensen_shannon
+)
+    @assert ndims(district_dists) == 3
+    N, C, Gmax = size(district_dists)
+    @assert length(n_groups) == C
+
+    # We'll create a vector of NxN matrices for each characteristic
+    dist_by_char = [Matrix{Float64}(undef, N, N) for _ in 1:C]
+    dist_agg = Matrix{Float64}(undef, N, N)
+    fill!(dist_agg, 0.0)
+
+    @inbounds for c in 1:C
+        Gc = n_groups[c]
+        Dc = dist_by_char[c]
+
+        # Build pairwise distances for this characteristic
+        @inbounds for i in 1:N
+            Dc[i, i] = 0.0
+            pi = view(district_dists, i, c, 1:Gc)
+            for j in i+1:N
+                pj = view(district_dists, j, c, 1:Gc)
+                dval = metric(pi, pj)
+                Dc[i, j] = dval
+                Dc[j, i] = dval
+            end
+        end
+
+        # Accumulate into dist_agg
+        @inbounds for i in 1:N
+            for j in i+1:N
+                dist_agg[i, j] += Dc[i, j]
+                dist_agg[j, i] += Dc[i, j]
+            end
         end
     end
 
-    return spatial_distances, distributional_distances
-end
-
-function bootstrap_distributional_correlation(N, K, U, sigma_c, sigma_c_prime, delta, statewide_probs, A_values, rng; alpha=1.0, beta=1.0, n_bootstrap=100)
-    correlations = Float64[]
-    m = zeros(Float64, size(statewide_probs[1]))  # Preallocate JSD intermediate result
-
-    for _ in 1:n_bootstrap
-        # Generate map
-        centers = generate_cluster_centers(K, sigma_c_prime, rng)
-        coords, is_urban = place_nodes(N, U, centers, sigma_c, rng)
-        adjacency = build_adjacency(coords; delta=delta)
-        node_dists = build_node_distributions(coords, statewide_probs, A_values, rng; alpha=alpha, beta=beta)
-
-        # Generate distance matrices
-        spatial_distances, distributional_distances = generate_distance_matrices(coords, node_dists, m)
-
-        # Compute correlation
-        correlation = compute_distance_correlation(spatial_distances, distributional_distances)
-        push!(correlations, correlation)
+    # Take average across characteristics
+    invC = 1.0 / C
+    @inbounds for i in 1:N
+        for j in i:N
+            dist_agg[i, j] *= invC
+            dist_agg[j, i] = dist_agg[i, j]
+        end
     end
 
-    mean_correlation = mean(correlations)
-    median_correlation = median(correlations)
-    std_correlation = std(correlations)
-
-    return mean_correlation, median_correlation, std_correlation
+    return dist_by_char, dist_agg
 end
 
+# 5) Mantel test for correlation between two NxN distance matrices
+function mantel_test(
+    D1::AbstractMatrix{<:Real},
+    D2::AbstractMatrix{<:Real};
+    permutations::Int,
+    rng::AbstractRNG
+)
+    @assert size(D1) == size(D2)
+    N = size(D1, 1)
+    # Flatten upper triangle
+    n_pairs = (N * (N - 1)) >>> 1  # N*(N-1)//2
+    distvec1 = Vector{Float64}(undef, n_pairs)
+    distvec2 = Vector{Float64}(undef, n_pairs)
 
-# Run combinations with JSD-based spatial correlation
-function run_combinations_with_jsd()
-    # Parameters
-    N = 200
-    K = 3
-    sigma_c = 0.05
-    sigma_c_prime = 0.15
-    statewide_probs = [[0.4, 0.3, 0.3]]
-    n_bootstrap = 100
-    rng = MersenneTwister(123)
-
-    U_values = [0.9, 0.6, 0.3]
-    A_j_values = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
-    alpha_values = [0.0, 0.25, 0.5, 0.75, 1.0]
-    threshold_values = [0.1, 0.2, 0.3]
-
-    combinations = [(U, A_j, alpha, threshold) for U in U_values, A_j in A_j_values, alpha in alpha_values, threshold in threshold_values]
-
-    results = DataFrame(U=Float64[], A_j=Float64[], alpha=Float64[], threshold=Float64[], mean_corr=Float64[], median_corr=Float64[], std_corr=Float64[])
-
-    for (U, A_j, alpha, threshold) in combinations
-        println("Running combination U=$U, A_j=$A_j, alpha=$alpha, threshold=$threshold")
-        mean_corr, median_corr, std_corr = bootstrap_distributional_correlation(
-            N, K, U, sigma_c, sigma_c_prime, threshold, statewide_probs, [A_j], rng; alpha=alpha, beta=1.0, n_bootstrap=n_bootstrap
-        )
-        push!(results, (U, A_j, alpha, threshold, mean_corr, median_corr, std_corr))
+    idx = 1
+    @inbounds for i in 1:N-1
+        for j in i+1:N
+            distvec1[idx] = D1[i, j]
+            distvec2[idx] = D2[i, j]
+            idx += 1
+        end
     end
 
-    # Save results
-    CSV.write("bootstrap_jsd_correlation_results.csv", results)
-    println("Results saved to 'bootstrap_jsd_correlation_results.csv'")
+    obs_r = cor(distvec1, distvec2)
+
+    # Permutation test
+    count_extreme = 0
+    permdist = Vector{Float64}(undef, n_pairs)
+
+    for _ in 1:permutations
+        p = randperm(rng, N)
+        idx = 1
+        @inbounds for i in 1:N-1
+            for j in i+1:N
+                permdist[idx] = D1[p[i], p[j]]
+                idx += 1
+            end
+        end
+        this_r = cor(permdist, distvec2)
+        if abs(this_r) >= abs(obs_r)
+            count_extreme += 1
+        end
+    end
+
+    p_value = (count_extreme + 1.0) / (permutations + 1.0)
+    return obs_r, p_value
 end
+
+"""
+    compute_mantel_spatial_correlation(
+        district_dists::Array{Float64,3},
+        n_groups::AbstractVector{Int},
+        coords::Matrix{Float64},
+        permutations::Int,
+        rng::AbstractRNG
+    ) -> NamedTuple
+
+Runs the entire pipeline:
+1. Compute NxN distances among demographic distributions (per characteristic + aggregated).
+2. Compute NxN distances among districts (geographic).
+3. Mantel test comparing dist_agg to Dgeo => (r_agg, p_agg).
+4. Mantel test comparing dist_by_char[c] to Dgeo for each characteristic => (r_chars[c], p_chars[c]).
+
+Returns a named tuple with:
+  :r_agg, :p_agg,
+  :r_chars, :p_chars,
+  :dist_agg, :dist_by_char, :Dgeo
+"""
+function compute_mantel_spatial_correlation(
+    district_dists::Array{Float64,3},
+    n_groups::AbstractVector{Int},
+    coords::Matrix{Float64},
+    permutations::Int,
+    rng::AbstractRNG
+)
+    # 1) Demographic distance matrices
+    dist_by_char, dist_agg = compute_demo_distances(district_dists, n_groups)
+
+    # 2) Geographic distance
+    Dgeo = compute_spatial_distance(coords)
+
+    # 3) Mantel test for aggregated
+    r_agg, p_agg = mantel_test(dist_agg, Dgeo; permutations=permutations, rng=rng)
+
+    # 4) Mantel test for each characteristic
+    C = length(n_groups)
+    r_chars = Vector{Float64}(undef, C)
+    p_chars = Vector{Float64}(undef, C)
+    for c in 1:C
+        rc, pc = mantel_test(dist_by_char[c], Dgeo; permutations=permutations, rng=rng)
+        r_chars[c] = rc
+        p_chars[c] = pc
+    end
+
+    return (
+        r_agg=r_agg,
+        p_agg=p_agg,
+        r_chars=r_chars,
+        p_chars=p_chars,
+        dist_agg=dist_agg,
+        dist_by_char=dist_by_char,
+        Dgeo=Dgeo
+    )
+end
+
+function shannon_entropy(p::Vector{Float64})
+    H = 0.0
+    @inbounds for pk in p
+        if pk > 0
+            H -= pk * log(pk)
+        end
+    end
+    return H
+end
+
+# Suppose 'distmat' is a D x K matrix where distmat[d, :] is the distribution
+# for district d over K categories. We'll compute a vector of entropies.
+function district_entropies(distmat::AbstractMatrix{Float64})
+    D, K = size(distmat)
+    ent = Vector{Float64}(undef, D)
+    for d in 1:D
+        p = distmat[d, :]
+        ent[d] = shannon_entropy(p)
+    end
+    return ent
+end
+
+function compute_district_entropies_over_N(array::Array{Float64,3})
+    N, C, G = size(array)
+    # Compute the entropies for each district (N dimension)
+    entropies = Vector{Float64}(undef, N)
+    for n in 1:N
+        slice = view(array, n, :, :)  # Extract C×G slice for district n
+        entropies[n] = sum(district_entropies(slice))
+    end
+    return entropies
+end
+
 
 end

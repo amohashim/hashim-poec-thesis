@@ -27,6 +27,7 @@ struct FixedParams{K}
 
     n_iterations::Int
     sample_size::Int
+    mantel_permutations::Int
 
 end
 
@@ -72,7 +73,7 @@ struct RepresentativesParams
 
     α_political_class::Float64
     p_norm::Float64
-
+    α_candidate_entry::Float64
     party_threshold::Float64
 
 end
@@ -81,7 +82,7 @@ struct BranchParams{K}
 
     n_parties::Int
     n_candidates::Int
-    α_candidate_entry::Float64
+
     turnout_level::Float64
     strategic_level::Float64
     demographic_attitudes::Union{SVector{K,AbstractMatrix},Nothing}

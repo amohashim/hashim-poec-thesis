@@ -5,6 +5,7 @@ export ExogeneousDemographicCharacteristics, EndogeneousDemogprahicCharacteristi
 export SpatialCharacteristics, SimulateIssuePreferences, SimulateQuestionPreferences
 export PartySimulation, CandidateSimulation, ElectionSimulation
 export CondorcetSmithFunctions, ProportionalEvaluationMetrics, MajoritarianEvaluationMetrics
+export TangianIndices
 export BranchAgnosticSequences, Branch1Sequences
 
 include("simulation_parameters.jl")
@@ -18,6 +19,7 @@ include("election_simulation.jl")
 include("condorcet_smith_functions.jl")
 include("proportional_evaluation_metrics.jl")
 include("majoritarian_evaluation_metrics.jl")
+include("tangian_indices.jl")
 include("branch_agnostic_sequences.jl")
 include("branch_1_sequences.jl")
 

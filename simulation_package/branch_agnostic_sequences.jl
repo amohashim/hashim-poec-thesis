@@ -3,6 +3,7 @@ module BranchAgnosticSequences
 using Parameters
 using Random
 using StaticArrays
+using Statistics
 
 using ..SimulationParameters
 using ..HelpfulFunctions
@@ -12,7 +13,10 @@ using ..SpatialCharacteristics
 using ..SimulateIssuePreferences
 using ..SimulateQuestionPreferences
 
+using ..ExperimentalDesign: RAW_NAME_TO_NICE_NAME
+
 export run_spatial_dist_sequence, run_voter_information_sequence
+export run_endogeneous_param_measurement_sequence
 
 function run_spatial_dist_sequence(fixed_params::FixedParams{K},
     dem_char_params::DemographicCharacteristicParams{K},
@@ -29,12 +33,12 @@ function run_spatial_dist_sequence(fixed_params::FixedParams{K},
             ) # also need this for finding entropy
     end
 
-    district_dists = SpatialCharacteristics.generate_spatial_characteristics(
+    district_dists, coords = SpatialCharacteristics.generate_spatial_characteristics(
         n_metros, spatial_dispersion, n_seats, urbanization, urban_sprawl, a_vals,
         statewide_demographic_dists, rng
     )
 
-    return statewide_demographic_dists, district_dists
+    return statewide_demographic_dists, district_dists, coords
 
 end
 
@@ -115,5 +119,50 @@ function run_voter_information_sequence(fixed_params::FixedParams{K},
     end
 
 end
+
+function run_endogeneous_param_measurement_sequence(fixed_params::FixedParams,
+    district_dists::Array{Float64,3}, coords::Matrix{Float64})
+
+    @unpack n_groups, n_characteristics, mantel_permutations, rng, n_seats = fixed_params
+    begin
+        agg_dist_corr, agg_dist_corr_p, char_level_corr, char_level_corr_p =
+            SpatialCharacteristics.compute_mantel_spatial_correlation(district_dists, n_groups,
+                coords, mantel_permutations, rng)
+    end
+
+    entropies = Matrix{Float64}(undef, n_seats, n_characteristics)
+
+    for seat in 1:n_seats
+
+        district_distributions = @view district_dists[seat, :, :]
+        entropies[seat, :] = SpatialCharacteristics.district_entropies(district_distributions)
+
+    end
+
+    avgs = mean.(eachcol(entropies))
+    medians = median.(eachcol(entropies))
+    stds = std.(eachcol(entropies))
+
+    begin
+        return SpatialAutocorrelationMeasurement(agg_dist_corr, agg_dist_corr_p,
+            char_level_corr, char_level_corr_p, avgs, medians, stds)
+    end
+end
+
+function run_compile_results_sequence(spatial_corr_measurements::SpatialAutocorrelationMeasurement,
+    prop_eval_metrics::ProportionalEvaluation, majoritarian_eval_metrics::MajoritarianEvaluation,
+    tangian_indices::TangianIndicesResults)
+
+    measurements = HelpfulFunctions.flatten_into_dict(
+        spatial_corr_measurements, prop_eval_metrics, majoritarian_eval_metrics, tangian_indices;
+        remove_substring="main.hashimpoecthesissimulationpackage."
+    )
+
+    ordered_result = OrderedDict(
+        RAW_NAME_TO_NICE_NAME[key] => measurements[key] for key in keys(RAW_NAME_TO_NICE_NAME3)
+    )
+
+end
+
 
 end
