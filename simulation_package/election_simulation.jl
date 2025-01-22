@@ -308,6 +308,7 @@ function run_single_round_election(ideal_points::AbstractVector{Array{Float64,3}
         proportions = Dict(idx => ct / pop_per_seat for (idx, ct) in counter(results))
 
         election_proportions[seat] = map_global_indx_to_props(candidate_map, proportions)
+
         voter_utilites[seat, :, :] = utilities
 
     end

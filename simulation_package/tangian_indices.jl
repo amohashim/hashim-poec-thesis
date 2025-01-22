@@ -1,7 +1,28 @@
 module TangianIndices
 
+export TangianIndicesResults
+
 using StaticArrays
 using Statistics
+using Parameters
+
+using ..SimulationParameters
+
+struct TangianIndicesResults
+
+    raw_pop_body::Float64
+    adj_pop_body::Float64
+    raw_uni_body::Float64
+    adj_uni_body::Float64
+
+    raw_pop_parties::Float64
+    adj_pop_parties::Float64
+    raw_uni_parties::Float64
+    adj_uni_parties::Float64
+
+end
+
+export computeTangianIndices
 
 """
     computeTangianIndices(
@@ -40,17 +61,19 @@ The function calculates:
 4) Raw & adjusted popularity (and universality) of the decisive body of parties (weighted by vote share)
 """
 function computeTangianIndices(
+    fixed_params::FixedParams, issue_structure::IssueStructure,
+    question_structure::QuestionStructure,
     question_positions::Vector{Array{Float64,3}},
     party_question_positions::Vector{Array{Float64,3}},
     election_winners::Vector{Int},
     proportional_election_results::Dict{Int,Float64},
-    N_QUESTIONS::SVector{K,Int},
-    N_POSITIONS::SVector{K,Int},
-    n_issues::Int,
-    N::Int,
-    A::Int,
-    N_PARTIES::Int
-) where {K}
+    n_parties::Int
+)
+
+    @unpack n_seats, pop_per_seat = fixed_params
+    @unpack n_questions, n_positions = question_structure
+    @unpack n_issues = issue_structure
+
     ############################################################################
     ## 1) Precompute totals for normalizations
     ############################################################################
@@ -60,24 +83,24 @@ function computeTangianIndices(
     # Summation of Q_k (the original question count)
     total_questions = 0
     @inbounds for k_ in 1:n_issues
-        total_decomposed += N_QUESTIONS[k_] * N_POSITIONS[k_]
-        total_questions += N_QUESTIONS[k_]
+        total_decomposed += n_questions[k_] * n_positions[k_]
+        total_questions += n_questions[k_]
     end
 
     ############################################################################
     ## 2) Prepare output arrays for district-level results
     ############################################################################
-    raw_pop_candidates = Array{Float64}(undef, N)
-    adj_pop_candidates = Array{Float64}(undef, N)
-    raw_uni_candidates = Array{Float64}(undef, N)
-    adj_uni_candidates = Array{Float64}(undef, N)
+    raw_pop_candidates = Array{Float64}(undef, n_seats)
+    adj_pop_candidates = Array{Float64}(undef, n_seats)
+    raw_uni_candidates = Array{Float64}(undef, n_seats)
+    adj_uni_candidates = Array{Float64}(undef, n_seats)
 
     ############################################################################
     ## 3) District-by-district loop for winning candidates
     ############################################################################
     # We'll accumulate the results for each district's winning candidate.
     # Then we can average them for the "decisive body of winners".
-    @inbounds for n_ in 1:N
+    @inbounds for n_ in 1:n_seats
         c = election_winners[n_]  # index of the winning candidate in district n_
 
         # We'll keep track of:
@@ -92,21 +115,21 @@ function computeTangianIndices(
 
         # Loop across issues, then questions
         for k_ in 1:n_issues
-            Qk = N_QUESTIONS[k_]
-            Pk = N_POSITIONS[k_]  # number of positions in decomposition for issue k
+            Qk = n_questions[k_]
+            Pk = n_positions[k_]  # number of positions in decomposition for issue k
             arr_k = question_positions[k_]  # 3D array: Qk x N x A
 
             for q_ in 1:Qk
                 # Count how many voters match the candidate's position
                 pos_candidate = @inbounds arr_k[q_, n_, c]
                 match_count::Int = 0
-                @inbounds @simd for i_ in 1:A
+                @inbounds @simd for i_ in 1:pop_per_seat
                     if arr_k[q_, n_, i_] == pos_candidate
                         match_count += 1
                     end
                 end
 
-                fraction = match_count / A
+                fraction = match_count / pop_per_seat
 
                 # Raw weighting:
                 sum_of_fractions_raw += fraction * Pk
@@ -157,13 +180,13 @@ function computeTangianIndices(
     # or total_questions). Then weight by the party’s vote share.
 
     # Pre-allocate accumulators for each party:
-    pop_raw_by_party = zeros(Float64, N_PARTIES)
-    pop_adjusted_by_party = zeros(Float64, N_PARTIES)
-    uni_raw_by_party = zeros(Float64, N_PARTIES)
-    uni_adjusted_by_party = zeros(Float64, N_PARTIES)
+    pop_raw_by_party = zeros(Float64, n_parties)
+    pop_adjusted_by_party = zeros(Float64, n_parties)
+    uni_raw_by_party = zeros(Float64, n_parties)
+    uni_adjusted_by_party = zeros(Float64, n_parties)
 
     # We'll iterate party by party:
-    @inbounds for p_ in 1:N_PARTIES
+    @inbounds for p_ in 1:n_parties
         # We'll accumulate over all issues & questions, counting how many
         # voters share the party's position. Then do the raw vs adjusted weighting.
         sum_of_fractions_raw = 0.0
@@ -172,8 +195,8 @@ function computeTangianIndices(
         sum_of_univ_adjusted = 0.0
 
         for k_ in 1:n_issues
-            Qk = N_QUESTIONS[k_]
-            Pk = N_POSITIONS[k_]
+            Qk = n_questions[k_]
+            Pk = n_positions[k_]
             arr_k_voters = question_positions[k_]           # Qk x N x A
             arr_k_party = party_question_positions[k_]     # Qk x 1 x N_PARTIES
 
@@ -181,15 +204,15 @@ function computeTangianIndices(
                 pos_party = @inbounds arr_k_party[q_, 1, p_]
                 match_count = 0
                 # We will count matches for *all* voters across all N districts
-                @inbounds @simd for n_ in 1:N
-                    @inbounds @simd for i_ in 1:A
+                @inbounds @simd for n_ in 1:n_seats
+                    @inbounds @simd for i_ in 1:pop_per_seat
                         if arr_k_voters[q_, n_, i_] == pos_party
                             match_count += 1
                         end
                     end
                 end
                 # fraction of entire electorate that matches:
-                fraction = match_count / (N * A)
+                fraction = match_count / (n_seats * pop_per_seat)
 
                 # Raw weighting (treat sub-positions as separate)
                 sum_of_fractions_raw += fraction * Pk
@@ -229,21 +252,27 @@ function computeTangianIndices(
         adj_uni_parties += w * uni_adjusted_by_party[p_]
     end
 
+    return TangianIndicesResults(
+        raw_pop_body, adj_pop_body, raw_uni_body, adj_uni_body,
+        raw_pop_parties, adj_pop_parties, raw_uni_parties, adj_uni_parties
+    )
+
+
     ############################################################################
     ## 6) Return all results in a convenient container
     ############################################################################
-    return (
-        raw_pop_candidates=raw_pop_candidates,
-        adj_pop_candidates=adj_pop_candidates,
-        raw_uni_candidates=raw_uni_candidates,
-        adj_uni_candidates=adj_uni_candidates, raw_pop_body=raw_pop_body,
-        adj_pop_body=adj_pop_body,
-        raw_uni_body=raw_uni_body,
-        adj_uni_body=adj_uni_body, raw_pop_parties=raw_pop_parties,
-        adj_pop_parties=adj_pop_parties,
-        raw_uni_parties=raw_uni_parties,
-        adj_uni_parties=adj_uni_parties
-    )
+    # return (
+    #     raw_pop_candidates=raw_pop_candidates,
+    #     adj_pop_candidates=adj_pop_candidates,
+    #     raw_uni_candidates=raw_uni_candidates,
+    #     adj_uni_candidates=adj_uni_candidates, raw_pop_body=raw_pop_body,
+    #     adj_pop_body=adj_pop_body,
+    #     raw_uni_body=raw_uni_body,
+    #     adj_uni_body=adj_uni_body, raw_pop_parties=raw_pop_parties,
+    #     adj_pop_parties=adj_pop_parties,
+    #     raw_uni_parties=raw_uni_parties,
+    #     adj_uni_parties=adj_uni_parties
+    # )
 end
 
 end # module
@@ -378,22 +407,11 @@ function computeTangianIndicesFixed(
         adj_uni_parties += vote_share * adj_uni
     end
 
-    # Return all results
-    return (
-        raw_pop_candidates=raw_pop_candidates,
-        adj_pop_candidates=adj_pop_candidates,
-        raw_uni_candidates=raw_uni_candidates,
-        adj_uni_candidates=adj_uni_candidates,
-        raw_pop_body=raw_pop_body,
-        adj_pop_body=adj_pop_body,
-        raw_uni_body=raw_uni_body,
-        adj_uni_body=adj_uni_body,
-        raw_pop_parties=raw_pop_parties,
-        adj_pop_parties=adj_pop_parties,
-        raw_uni_parties=raw_uni_parties,
-        adj_uni_parties=adj_uni_parties
+    return TangianIndicesResults(
+        raw_pop_body, adj_pop_body, raw_uni_body, adj_uni_body,
+        raw_pop_parties, adj_pop_parties, raw_uni_parties, adj_uni_parties
     )
-end
 
+end
 
 end # module
