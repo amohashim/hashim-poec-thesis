@@ -87,7 +87,7 @@ function run_proportional_election_sequence(fixed_params::FixedParams{K},
     winning_parties, raw_vote_counts = run_proportional_election(preferred_parties, n_seats,
         pop_per_seat, party_threshold, n_parties)
 
-    @time begin
+    begin
         prop_eval_metrics =
             ProportionalEvaluationMetrics.evaluate_proportional_election(
                 party_ideal_points, voter_question_positions, party_question_positions,
@@ -164,7 +164,12 @@ function run_majoritarian_sequence(fixed_params::FixedParams{K},
             candidate_enters = enforce_n_candidates(candidate_enters, n_candidates)
             local_indices = collect(1:pop_per_seat)[candidate_enters]
 
-            candidate_indices[seat] = sample(rng, local_indices, n_candidates, replace=false)
+            try
+                candidate_indices[seat] = sample(rng, local_indices, n_candidates, replace=false)
+            catch
+                local_indices = collect(1:pop_per_seat)
+                candidate_indices[seat] = sample(rng, local_indices, n_candidates)
+            end
 
         end
 
@@ -205,7 +210,7 @@ function run_majoritarian_sequence(fixed_params::FixedParams{K},
     candidates = candidate_entry(ideal_points, α_political_class, p_norm, n_candidates, n_seats,
         pop_per_seat, α_candidate_entry, rng)
 
-    @time winning_candidates, voter_utilities_for_candidates, first_round_candidate_choices =
+    winning_candidates, voter_utilities_for_candidates, first_round_candidate_choices =
         run_majoritarian_election(ideal_points, voter_issue_weights, candidates, n_seats,
             n_candidates, n_issues, pop_per_seat, issue_dimensions
         )
@@ -215,7 +220,7 @@ function run_majoritarian_sequence(fixed_params::FixedParams{K},
     )
 
     # VSE MAJORITARIAN
-    @time maj_evaluation = MajoritarianEvaluationMetrics.evaluate_majoritarian_election(
+    maj_evaluation = MajoritarianEvaluationMetrics.evaluate_majoritarian_election(
         voter_question_positions, voter_issue_weights, candidates, winning_candidates,
         voter_utilities_for_candidates, preferred_parties, n_seats, pop_per_seat, n_issues,
         n_questions, n_candidates

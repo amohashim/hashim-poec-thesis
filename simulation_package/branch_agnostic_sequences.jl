@@ -1,5 +1,8 @@
 module BranchAgnosticSequences
 
+using CSV
+using DataFrames
+using DataStructures
 using Parameters
 using Random
 using StaticArrays
@@ -12,11 +15,15 @@ using ..EndogeneousDemogprahicCharacteristics
 using ..SpatialCharacteristics
 using ..SimulateIssuePreferences
 using ..SimulateQuestionPreferences
+using ..ProportionalEvaluationMetrics
+using ..MajoritarianEvaluationMetrics
+using ..TangianIndices
 
-using ..ExperimentalDesign: RAW_NAME_TO_NICE_NAME
+using ..ExperimentDesignInterfaceTools: RAW_NAME_TO_NICE_NAME, FACTOR_ORDER, create_results_frame
 
 export run_spatial_dist_sequence, run_voter_information_sequence
 export run_endogeneous_param_measurement_sequence
+export run_compile_results_sequence
 
 function run_spatial_dist_sequence(fixed_params::FixedParams{K},
     dem_char_params::DemographicCharacteristicParams{K},
@@ -151,7 +158,7 @@ end
 
 function run_compile_results_sequence(spatial_corr_measurements::SpatialAutocorrelationMeasurement,
     prop_eval_metrics::ProportionalEvaluation, majoritarian_eval_metrics::MajoritarianEvaluation,
-    tangian_indices::TangianIndicesResults)
+    tangian_indices::TangianIndicesResults, run_parameters_column::DataFrameRow)
 
     measurements = HelpfulFunctions.flatten_into_dict(
         spatial_corr_measurements, prop_eval_metrics, majoritarian_eval_metrics, tangian_indices;
@@ -159,8 +166,10 @@ function run_compile_results_sequence(spatial_corr_measurements::SpatialAutocorr
     )
 
     ordered_result = OrderedDict(
-        RAW_NAME_TO_NICE_NAME[key] => measurements[key] for key in keys(RAW_NAME_TO_NICE_NAME3)
+        RAW_NAME_TO_NICE_NAME[key] => measurements[key] for key in keys(RAW_NAME_TO_NICE_NAME)
     )
+
+    return create_results_frame(ordered_result, run_parameters_column, FACTOR_ORDER)
 
 end
 
