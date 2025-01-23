@@ -1,6 +1,6 @@
 module HashimPoecThesisSimulationPackage
 
-export SimulationParameters, HelpfulFunctions
+export SimulationParameters, HelpfulFunctions, ExperimentParameters, ExperimentDesignInterfaceTools
 export ExogeneousDemographicCharacteristics, EndogeneousDemogprahicCharacteristics
 export SpatialCharacteristics, SimulateIssuePreferences, SimulateQuestionPreferences
 export PartySimulation, CandidateSimulation, ElectionSimulation
@@ -10,6 +10,8 @@ export BranchAgnosticSequences, Branch1Sequences
 
 include("simulation_parameters.jl")
 include("helpful_functions.jl")
+include("experiment_parameters.jl")
+include("experimental_design_tools.jl")
 include("simulate_demographic_characteristics.jl")
 include("simulate_spatial_characteristics.jl")
 include("simulating_preferences.jl")

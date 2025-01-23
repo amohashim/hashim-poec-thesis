@@ -137,6 +137,7 @@ end
 function build_coalition_options(n_parties::Int)
 
     # worst case is 1/n_parties vote share for each party
+
     combos = collect(combinations(1:n_parties))
     i = length.(combos) .<= ceil(n_parties * 0.5)
     coalitions = combos[i]
@@ -255,6 +256,7 @@ function evaluate_party_profiles(voter_question_positions::AbstractVector{Array{
 
     coalition_options = build_coalition_options(n_parties)
     n_coalitions = length(coalition_options)
+
     begin
         strict_coalition_profiles, qualified_coalition_profiles, coalition_unanimities,
         coalition_qualified_unanimities =
@@ -640,7 +642,6 @@ function determine_proportional_metrics(coalition_options::Vector{Vector{Int}},
     )
 
     if observed_winner == 0
-
         minority_govt_party = find_minority_government_party(winning_parties)
         minority_govt_coalitions, minority_govt_indices = find_minority_coalitions(
             minority_govt_party, winning_parties, coalition_options
@@ -654,7 +655,7 @@ function determine_proportional_metrics(coalition_options::Vector{Vector{Int}},
 
         if isnothing(minority_govt)
 
-            return ProportionalEvalIndicators(nothing), ProportionalEvalMeasures(nothing)
+            return ProportionalEvalMeasures(nothing), ProportionalEvalIndicators(nothing)
 
         end
 
@@ -689,12 +690,15 @@ function determine_proportional_metrics(coalition_options::Vector{Vector{Int}},
         minority_govt_unstable, size_minority_govt
     )
 
+
     indicators = [
         prop_minco, single_party_win, winner_is_condorcet, winner_in_smith_set, condorcet_paradox,
         utility_maxer_elected, election_failed
     ]
+
     prop_eval_measures = ProportionalEvalMeasures(utility_of_winner, utility_from_maxer,
         utility_efficiency, non_zero_positions, median_positions, unanimity, n_seats)
+
     pop_eval_indicators = ProportionalEvalIndicators(indicators...)
 
     return prop_eval_measures, pop_eval_indicators

@@ -1,19 +1,26 @@
 cd("/Users/alihashim/Desktop/Online_Academic_Submissions/poec_thesis/simulation_package")
 include("SimulationPackage.jl")
 
+using Base.Threads
 using Random
 using StaticArrays
 using Parameters
+using CSV
+using DataFrames
+using Logging, LoggingExtras
 
 using .HashimPoecThesisSimulationPackage
 using ..SimulationParameters
+using ..ExperimentDesignInterfaceTools: read_in_subdesign, initialize_output_dataframe
+using ..ExperimentDesignInterfaceTools: intitialize_simulation_run
+using ..ExperimentParameters
 using ..BranchAgnosticSequences
 using ..Branch1Sequences
 using ..TangianIndices
 
 function define_parameters()
 
-    rng = MersenneTwister(2024)
+    rng = MersenneTwister(rand(1:10_000_000))
 
     n_characteristics = 5
     n_groups = SVector{5,Int}([3, 3, 5, 5, 2])
@@ -38,114 +45,121 @@ function define_parameters()
     sample_size = 400
     mantel_permutations = 1000
 
-    characteristic_type = SVector{n_characteristics,Symbol}(
-        [:ordinal, :ordinal, :nominal, :nominal, :nominal]
-    )
-    homogeneity = SVector{n_characteristics,Symbol}(
-        [:high, :low, :moderate, :low, :high]
-    )
-
-    n_metros = 3
-    urbanization = 0.9
-    urban_sprawl = 0.05
-    spatial_dispersion = 0.05
-    a_vals = SVector{n_characteristics,Float64}([0.5, 0.5, 0.5, 0.5, 0.5])
-
-
-    n_issues = 1
-    issue_dimensions = SVector{n_issues,Int}([1])
-
-    demographic_salience = SVector{n_characteristics,Symbol}(
-        [:moderate, :moderate, :moderate, :moderate, :moderate]
-    )
-    demographic_cleavage_salience = SMatrix{n_characteristics,n_issues,Int}(
-        [2; 2; 2; 2; 0]
-    )
-
-    n_questions = SVector{n_issues,Int}([20])
-    n_positions = SVector{n_issues,Int}([2])
-
-    α_political_class = 0.01
-    α_candidate_entry = 1.0
-    p_norm = 5.0
-    party_threshold = 0.05
-
-    n_parties = 5
-    n_candidates = 5
-    turnout_level = 0.0
-    strategic_level = 1.0
-    demographic_attitudes = nothing
-
     fixed_params = FixedParams(rng, n_characteristics, n_groups, salience_to_probs, n_seats,
         pop_per_seat, σ_none, σ_low, σ_moderate, σ_high, gamma, n_iterations, sample_size,
         mantel_permutations
     )
 
-    dem_char_params = DemographicCharacteristicParams(characteristic_type, homogeneity)
-    spatial_params = SpatialCharacteristicParams(
-        n_metros, urbanization, urban_sprawl, spatial_dispersion, a_vals
-    )
-    issue_structure = IssueStructure(n_issues, issue_dimensions)
-    salience_structure = SalienceStructure(demographic_salience, demographic_cleavage_salience)
-    question_structure = QuestionStructure(n_questions, n_positions)
-    representative_params = RepresentativesParams(
-        α_political_class, p_norm, α_candidate_entry, party_threshold
-    )
-    branch_params = BranchParams{n_characteristics}(
-        n_parties, n_candidates, turnout_level, strategic_level,
-        demographic_attitudes
-    )
-
-
-    begin
-        return fixed_params, dem_char_params, spatial_params, issue_structure, salience_structure,
-        question_structure, representative_params, branch_params
-    end
+    return fixed_params
 
 end
 
+function io_task(io_channel::Channel{DataFrame}, output_path::String, io_chunk_size::Int)
+    temp_output = DataFrame()  # Local buffer for I/O task
+
+    for chunk in io_channel
+        append!(temp_output, chunk)
+
+        if size(temp_output, 1) >= io_chunk_size
+            # Write the buffered rows to the file
+            CSV.write(output_path, temp_output; append=true)
+            println("wrote to cscv")
+            empty!(temp_output)  # Clear the buffer
+        end
+    end
+
+    # Write any remaining data after the channel closes
+    if !isempty(temp_output)
+        CSV.write(output_path, temp_output; append=true)
+    end
+end
+
+const SUBDESIGN_FILE_NAME::String = "/Users/alihashim/Desktop/Online_Academic_Submissions/poec_thesis/design_matrix/issue_L1_cand_L2_party_L2_voter_L1.csv"
+const OUTPUT_PATH::String = "output.csv"
+const RUN_RANGE::UnitRange = 1:80
+const IO_CHUNK_SIZE::Int = 5
+const N_THREADS::Int = 4
+
 function main()
+    # Open a log file
+    log_file = open("error_log.txt", "w")
+    file_logger = FileLogger(log_file)
+    global_logger(file_logger)  # Set the file logger as the global logger
 
-    # df_sub = filter(row -> (row.X == 1 && row.Y == 1 && row.Z == 0), df)
+    design_matrix = read_in_subdesign(SUBDESIGN_FILE_NAME)
+    output = initialize_output_dataframe(OUTPUT_PATH)
 
-    begin
-        fixed_params, dem_char_params, spatial_params, issue_structure, salience_structure,
-        question_structure, representative_params, branch_params = define_parameters()
+    # io_run_iteration = 1
+    # temp_output = initialize_output_dataframe()
+
+    io_channel = Channel{DataFrame}(N_THREADS * 2)
+    @spawn io_task(io_channel, OUTPUT_PATH, IO_CHUNK_SIZE)
+
+    Threads.@threads for simulation_run in RUN_RANGE
+        println(simulation_run)
+
+        fixed_params = define_parameters() # need this in the loop for thread-safe RNG
+
+        try
+            begin
+                dem_char_params, spatial_params, issue_structure, salience_structure,
+                question_structure, representative_params, branch_params, params_row =
+                    intitialize_simulation_run(
+                        simulation_run, design_matrix
+                    )
+            end
+
+            statewide_demographic_dists, district_dists, coords = run_spatial_dist_sequence(
+                fixed_params, dem_char_params, spatial_params
+            )
+
+            begin
+                voters, ideal_points, ideal_means, ideal_variances, voter_issue_weights,
+                voter_question_positions = run_voter_information_sequence(
+                    fixed_params, salience_structure, issue_structure, question_structure,
+                    district_dists
+                )
+            end
+
+            spatial_corr_measurements = run_endogeneous_param_measurement_sequence(
+                fixed_params, district_dists, coords
+            )
+
+            prop_eval_metrics, tangian_inputs, preferred_parties = run_proportional_election_sequence(
+                fixed_params, issue_structure, representative_params, branch_params, question_structure,
+                ideal_points, ideal_means, ideal_variances, voter_question_positions, voter_issue_weights
+            )
+
+            majoritarian_eval_metrics, winning_candidates = run_majoritarian_sequence(
+                fixed_params, issue_structure, branch_params, question_structure, representative_params,
+                ideal_points, voter_question_positions, voter_issue_weights, preferred_parties
+            )
+
+            party_question_positions, winning_parties, n_parties = tangian_inputs
+
+            tangian_indices = computeTangianIndices(fixed_params, issue_structure, question_structure,
+                voter_question_positions, party_question_positions, winning_candidates, winning_parties,
+                n_parties
+            )
+
+            results_row = run_compile_results_sequence(spatial_corr_measurements, prop_eval_metrics,
+                majoritarian_eval_metrics, tangian_indices, params_row)
+
+            put!(io_channel, DataFrame([results_row]))
+
+        catch e
+
+            # Log error with simulation_run and stacktrace
+            @error "Error in simulation_run $simulation_run: $e"
+            @error "Simulation run failed on iteration $simulation_run"
+            @error "Stacktrace: $(stacktrace(e))"
+            continue
+
+        end
+
     end
 
-    statewide_demographic_dists, district_dists, coords = run_spatial_dist_sequence(
-        fixed_params, dem_char_params, spatial_params
-    )
-
-    begin
-        voters, ideal_points, ideal_means, ideal_variances, voter_issue_weights,
-        voter_question_positions = run_voter_information_sequence(
-            fixed_params, salience_structure, issue_structure, question_structure,
-            district_dists
-        )
-    end
-
-    spatial_corr_measurements = run_endogeneous_param_measurement_sequence(
-        fixed_params, district_dists, coords
-    )
-
-    prop_eval_metrics, tangian_inputs, preferred_parties = run_proportional_election_sequence(
-        fixed_params, issue_structure, representative_params, branch_params, question_structure,
-        ideal_points, ideal_means, ideal_variances, voter_question_positions, voter_issue_weights
-    )
-
-    majoritarian_eval_metrics, winning_candidates = run_majoritarian_sequence(
-        fixed_params, issue_structure, branch_params, question_structure, representative_params,
-        ideal_points, voter_question_positions, voter_issue_weights, preferred_parties
-    )
-
-    party_question_positions, winning_parties, n_parties = tangian_inputs
-
-    tangian_indices = computeTangianIndices(fixed_params, issue_structure, question_structure,
-        voter_question_positions, party_question_positions, winning_candidates, winning_parties,
-        n_parties
-    )
-
+    close(io_channel)
 end
 
 

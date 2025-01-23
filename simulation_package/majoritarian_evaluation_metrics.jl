@@ -225,6 +225,7 @@ function compute_utilities_for_candidate_profiles(
             # candidate_profiles[issue][:, seat, :] is Qᵢ × n_candidates_per_district
             # voter_question_positions[issue][:, seat, :] is Qᵢ × pop_per_seat
             # voter_issue_weights[issue, seat, :] is pop_per_seat
+
             profile = candidate_profiles[issue][:, seat, :]
             district_positions = voter_question_positions[issue][:, seat, :]
             seat_issue_weights = voter_issue_weights[issue, seat, :]
@@ -235,7 +236,7 @@ function compute_utilities_for_candidate_profiles(
                 for j in 1:n_candidates_per_district
                     s = 0.0
                     @inbounds for q in 1:Qᵢ
-                        s += abs(district_positions[q, i] - profile[q, j])
+                        s += abs(district_positions[q, i] - profile[q, j])^2
                     end
                     voter_utilities[seat, i, j] += -s * seat_issue_weights[i]
                 end
@@ -526,11 +527,11 @@ function evaluate_majoritarian_election(voter_question_positions::AbstractVector
     )
 
     strict_maj_body_metrics = evaluate_decisive_body_profile(decisive_body_profile_strict,
-        voter_question_positions, voter_issue_weights, n_seats, pop_per_seat, n_issues
+        voter_question_positions, voter_issue_weights, 1, pop_per_seat, n_issues
     )
 
     qualified_maj_body_metrics = evaluate_decisive_body_profile(decisive_body_profile_qualified,
-        voter_question_positions, voter_issue_weights, n_seats, pop_per_seat, n_issues
+        voter_question_positions, voter_issue_weights, 1, pop_per_seat, n_issues
     )
 
     district_utility_metrics = Matrix{Float64}(undef, n_seats, 4)

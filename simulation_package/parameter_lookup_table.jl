@@ -64,19 +64,25 @@ end
 #####################################################
 #  C, D => SalienceStructure
 #####################################################
-function getSalienceStructure(levelC::String, levelD::String, levelE::String)
+function getSalienceStructure(levelC::String, levelD::String)
     # Suppose factor C picks from e.g. [:low, :medium, :high] salience
     # Suppose factor D modifies the cleavage matrix dimension.
     # This is very hypothetical; adjust as needed.
 
-    if levelC == "L1"
+    #C_{e}_{level}
+
+    if levelC == "C1_1"
         demographic_salience = @SVector [:none, :none, :none, :none, :none]
-    elseif levelC == "L2"
+    elseif levelC == "C1_2"
         demographic_salience = @SVector [:none, :low, :moderate, :moderate, :high]
-    elseif levelC == "L3"
+    elseif levelC == "C1_3"
         demographic_salience = @SVector [:high, :high, :high, :high, :high]
-    else
-        error("Unknown C level $levelC")
+    elseif levelC == "C2_1"
+        @SMatrix [:none, :none, :none, :none, :none]
+    elseif levelC == "C2_2"
+        @SMatrix [:none, :none, :none, :none, :none]
+    elseif levelC == "C3_2"
+        @SMatrix [:none, :none, :none, :none, :none]
     end
 
     if levelE == "L1"

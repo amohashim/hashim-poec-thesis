@@ -301,4 +301,65 @@ function flatten_into_dict(result_structs...; remove_substring="")
     return acc
 end
 
+"""
+For moderate 1 issue:
+L = 1, U = 2, W = 10
+
+For moderate 3 issue:
+L = 3, U = 6, W = 30
+
+For moderate 5 issue:
+L = 5, U = 10, W = 50
+
+L is lower bound on sum of rows, U is upper bound on sum of rows, W is summer bound no sum of 
+    all entries
+"""
+function generate_random_matrix(D, L, U, W; max_attempts=10000)
+    attempts = 0
+
+    while attempts < max_attempts
+        attempts += 1
+
+        # Generate a random 5x3 matrix with entries in {0, 1, 2, 3}
+        mat = rand(0:3, 5, D)
+
+        # Check row-sum constraints
+        row_sums = sum(mat, dims=2)  # Sum along rows
+        if all(L .<= row_sums .<= U)  # Ensure row sums are within bounds
+            # Check total matrix sum constraint
+            if sum(mat) >= W
+                println("Solution found after $attempts attempts.")
+                return mat  # Return valid matrix
+            end
+        end
+    end
+
+    # If no solution is found within the max_attempts, return nothing or raise an error
+    println("No solution found after $max_attempts attempts.")
+    return nothing
+end
+
+function generate_matrix_with_row_mean(mean, rows, cols; max_attempts=10_000)
+    total_sum = mean * cols  # Total sum per row
+    attempts = 0
+
+    while attempts < max_attempts
+        attempts += 1
+
+        # Generate a random 5x3 matrix with entries in {0, 1, 2, 3}
+        mat = rand(0:3, rows, cols)
+
+        # Check if each row sums to total_sum
+        row_sums = sum(mat, dims=2)  # Sum along rows
+        if all(row_sums .== total_sum)
+            println("Solution found after $attempts attempts.")
+            return mat  # Return valid matrix
+        end
+    end
+
+    # If no solution is found within the max_attempts, return nothing
+    println("No solution found after $max_attempts attempts.")
+    return nothing
+end
+
 end
