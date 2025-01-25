@@ -33,7 +33,7 @@ function build_covariances(ideal_point_variances::Vector{Vector{Float64}}, n_iss
         Sigma_i = zeros(Float64, d_i, d_i)  # allocate the d_i x d_i matrix
         # Fill the diagonal
         @inbounds for k in 1:d_i
-            Sigma_i[k, k] = varvec[k]
+            Sigma_i[k, k] = varvec[k] + abs(rand(Normal(0, 1)))
         end
         covariances[i] = Sigma_i
     end

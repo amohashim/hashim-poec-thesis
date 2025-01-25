@@ -73,7 +73,8 @@ function run_proportional_election_sequence(fixed_params::FixedParams{K},
             voter_issue_weights, n_parties, n_issues, n_seats, pop_per_seat, issue_dimensions
         )
 
-    proportional_voter_utilities = HelpfulFunctions.scale_utilities(proportional_voter_utilities)
+    proportional_voter_utilities = HelpfulFunctions.scale_utilities(
+        proportional_voter_utilities, 0.0, 1000.0)
 
     party_ideal_points = convert_party_ideal_points_to_arrs(party_ideal_points, n_issues, n_parties,
         issue_dimensions
@@ -188,6 +189,8 @@ function run_majoritarian_sequence(fixed_params::FixedParams{K},
                 )
         end
 
+        plurality_winners = ElectionSimulation.tally_top_1(first_round_results, n_seats)
+
         run_off_candidates = ElectionSimulation.tally_top_2(first_round_results, n_seats)
 
         second_round_results, _, _ = ElectionSimulation.run_single_round_election(ideal_points,
@@ -197,8 +200,10 @@ function run_majoritarian_sequence(fixed_params::FixedParams{K},
 
         winning_candidates = ElectionSimulation.tally_top_1(second_round_results, n_seats)
 
-        return winning_candidates, voter_utilities, first_round_candidate_choices
-
+        begin
+            return winning_candidates, voter_utilities, first_round_candidate_choices,
+            plurality_winners
+        end
     end
 
     @unpack n_seats, pop_per_seat, sample_size, n_iterations, rng = fixed_params
@@ -210,24 +215,31 @@ function run_majoritarian_sequence(fixed_params::FixedParams{K},
     candidates = candidate_entry(ideal_points, α_political_class, p_norm, n_candidates, n_seats,
         pop_per_seat, α_candidate_entry, rng)
 
-    winning_candidates, voter_utilities_for_candidates, first_round_candidate_choices =
-        run_majoritarian_election(ideal_points, voter_issue_weights, candidates, n_seats,
-            n_candidates, n_issues, pop_per_seat, issue_dimensions
+    begin
+        winning_candidates, voter_utilities_for_candidates, first_round_candidate_choices,
+        plurality_winning_candidates = run_majoritarian_election(ideal_points, voter_issue_weights,
+            candidates, n_seats, n_candidates, n_issues, pop_per_seat, issue_dimensions
         )
+    end
 
     voter_utilities_for_candidates = HelpfulFunctions.scale_utilities(
-        voter_utilities_for_candidates
+        voter_utilities_for_candidates, 0.0, 1000.0
     )
 
-    # VSE MAJORITARIAN
     maj_evaluation = MajoritarianEvaluationMetrics.evaluate_majoritarian_election(
         voter_question_positions, voter_issue_weights, candidates, winning_candidates,
         voter_utilities_for_candidates, preferred_parties, n_seats, pop_per_seat, n_issues,
         n_questions, n_candidates
     )
 
+    plurality_evaluation = MajoritarianEvaluationMetrics.evaluate_majoritarian_election(
+        voter_question_positions, voter_issue_weights, candidates, plurality_winning_candidates,
+        voter_utilities_for_candidates, preferred_parties, n_seats, pop_per_seat, n_issues,
+        n_questions, n_candidates)
+
+
     tangian_inputs = winning_candidates
-    return maj_evaluation, tangian_inputs
+    return maj_evaluation, plurality_evaluation, tangian_inputs
 
 end
 

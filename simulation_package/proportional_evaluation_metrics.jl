@@ -3,6 +3,7 @@ module ProportionalEvaluationMetrics
 
 using Combinatorics
 using Distributions
+using Distances
 using Random
 using LinearAlgebra
 using DataStructures
@@ -63,29 +64,31 @@ struct ProportionalEvalMeasures
     unanimity::Int
     unanimity_rate::Float64
 
+    size_of_coalition::Int
+
     function ProportionalEvalMeasures(utility_from_winner::Float64, utility_from_maximizer::Float64,
         utility_efficiency::Float64, non_zero_positions::Int, median_position::Float64,
-        unanimity::Int, unanimity_rate::Float64)
+        unanimity::Int, unanimity_rate::Float64, size_of_coalition::Int)
 
         new(
             utility_from_winner, utility_from_maximizer, utility_efficiency, non_zero_positions,
-            median_position, unanimity, unanimity_rate
+            median_position, unanimity, unanimity_rate, size_of_coalition
         )
     end
 
     function ProportionalEvalMeasures(none::Nothing)
 
-        new(0.0, 0.0, 0.0, 0, 0, 0.0, 0.0)
+        new(0.0, 0.0, 0.0, 0, 0, 0.0, 0.0, 0)
 
     end
 
     function ProportionalEvalMeasures(utility_from_winner::Float64, utility_from_maximizer::Float64,
         utility_efficiency::Float64, non_zero_positions::Int, median_position::Float64,
-        unanimity::Int, n_seats::Int)
+        unanimity::Int, n_seats::Int, size_of_coalition::Int)
 
         new(
             utility_from_winner, utility_from_maximizer, utility_efficiency, non_zero_positions,
-            median_position, unanimity, unanimity / n_seats
+            median_position, unanimity, unanimity / n_seats, size_of_coalition
         )
 
     end
@@ -236,7 +239,7 @@ function compute_utilities_for_party_profiles(
                     s = 0.0
                     n_q = size(district_positions, 1)
                     @inbounds for q in 1:n_q
-                        s += abs(district_positions[q, voter] - profile[q, coalition])
+                        s += abs(district_positions[q, voter] - profile[q, coalition])^2
                     end
                     # Multiply by -1 and by seat_issue_weights[i], then accumulate
                     voter_utilities[seat, voter, coalition] += -s * seat_issue_weights[voter]
@@ -549,6 +552,39 @@ function find_eligible_condorcet_winner(voter_utilities_for_coalition_profiles::
 
 end
 
+using Statistics
+
+function compute_absolute_ideological_congruence(
+    voter_ideal_points::AbstractVector{Array{Float64,3}},
+    party_ideal_points::AbstractVector{Array{Float64,3}}, n_parties::Int, n_issues::Int,
+    issue_dimensions::AbstractVector{Int}, pop_per_seat::Int, n_seats::Int)
+
+    city_block_diffs_by_issue = Matrix{Float64}(undef, n_issues, n_parties)
+    @inbounds for issue in 1:n_issues
+
+        issue_dims = issue_dimensions[issue]
+        voter_points_issue = voter_ideal_points[issue]
+        party_points_issue = party_ideal_points[issue]
+
+        voter_points = reshape(voter_points_issue, (n_seats * pop_per_seat, issue_dims))
+        party_points = reshape(party_points_issue, (n_parties, issue_dims))
+
+        @inbounds for party in 1:n_parties
+
+            city_block_diffs_by_issue[issue, party] = sum(
+                cityblock.(Ref(party_points[party]), voter_points)
+            )
+
+        end
+
+    end
+
+    # arithmetic mean over the dimensions, arithmetic mean over the population
+    # so, it's the congruences on each issue averaged over the number of issues
+    return mean(city_block_diffs_by_issue, dims=1) ./ (pop_per_seat * n_seats)
+
+end
+
 function determine_condorcet_or_smith(observed_winner::Int,
     voter_utilities_for_coalition_profiles::Array{Float64,3},
     coalition_unanimities::AbstractVector{Int}, n_questions::AbstractVector{Int},
@@ -666,6 +702,7 @@ function determine_proportional_metrics(coalition_options::Vector{Vector{Int}},
     minority_govt_elected = true
 
     unanimity = observed_winner == 0 ? 0 : coalition_unanimities[observed_winner]
+    size_of_coalition = length(coalition_options[observed_winner])
 
     if observed_winner != 0
         winner_is_condorcet, winner_in_smith_set, condorcet_paradox =
@@ -697,7 +734,8 @@ function determine_proportional_metrics(coalition_options::Vector{Vector{Int}},
     ]
 
     prop_eval_measures = ProportionalEvalMeasures(utility_of_winner, utility_from_maxer,
-        utility_efficiency, non_zero_positions, median_positions, unanimity, n_seats)
+        utility_efficiency, non_zero_positions, median_positions, unanimity, n_seats,
+        size_of_coalition)
 
     pop_eval_indicators = ProportionalEvalIndicators(indicators...)
 
@@ -732,12 +770,12 @@ function evaluate_proportional_election(
     qualified_coalition_profiles = convert.(Array, qualified_coalition_profiles)
 
     voter_utilities_for_strict_coalition_profiles = scale_utilities(
-        voter_utilities_for_strict_coalition_profiles
+        voter_utilities_for_strict_coalition_profiles, 0.0, 1000.0
     )
     strict_social_utilities = sum(voter_utilities_for_strict_coalition_profiles, dims=(1, 2))[:]
 
     voter_utilities_for_qualified_coalition_profiles = scale_utilities(
-        voter_utilities_for_qualified_coalition_profiles
+        voter_utilities_for_qualified_coalition_profiles, 0.0, 1000.0
     )
     qualified_social_utilities = sum(
         voter_utilities_for_qualified_coalition_profiles, dims=(1, 2)
@@ -750,7 +788,7 @@ function evaluate_proportional_election(
         n_parties, n_issues
     ) # each party's utility from a given coalition
     party_utilities_for_strict_coalition_profiles = scale_utilities(
-        party_utilities_for_strict_coalition_profiles
+        party_utilities_for_strict_coalition_profiles, 0.0, 1000.0
     )
 
     party_utilities_for_qualified_coalition_profiles = compute_utilities_for_party_profiles(
@@ -758,8 +796,7 @@ function evaluate_proportional_election(
         n_parties, n_issues
     ) # each party's utility from a given coalition
     party_utilities_for_qualified_coalition_profiles = scale_utilities(
-        party_utilities_for_qualified_coalition_profiles
-    )
+        party_utilities_for_qualified_coalition_profiles, 0.0, 1000.0)
 
     utils_strict, indicators_strict = determine_proportional_metrics(
         coalition_options, strict_coalition_profiles, party_utilities_for_strict_coalition_profiles,

@@ -74,10 +74,10 @@ function io_task(io_channel::Channel{DataFrame}, output_path::String, io_chunk_s
     end
 end
 
-const SUBDESIGN_FILE_NAME::String = "/Users/alihashim/Desktop/Online_Academic_Submissions/poec_thesis/design_matrix/issue_L1_cand_L2_party_L2_voter_L1.csv"
-const OUTPUT_PATH::String = "output.csv"
-const RUN_RANGE::UnitRange = 1:80
-const IO_CHUNK_SIZE::Int = 5
+const SUBDESIGN_FILE_NAME::String = "/Users/alihashim/Desktop/Online_Academic_Submissions/poec_thesis/design_matrix/issue_L3_cand_L2_party_L2_voter_L1.csv"
+const OUTPUT_PATH::String = "test.csv"
+const RUN_RANGE::UnitRange = 1:10
+const IO_CHUNK_SIZE::Int = 1
 const N_THREADS::Int = 4
 
 function main()
@@ -87,7 +87,7 @@ function main()
     global_logger(file_logger)  # Set the file logger as the global logger
 
     design_matrix = read_in_subdesign(SUBDESIGN_FILE_NAME)
-    output = initialize_output_dataframe(OUTPUT_PATH)
+    # output = initialize_output_dataframe(OUTPUT_PATH)
 
     # io_run_iteration = 1
     # temp_output = initialize_output_dataframe()
@@ -96,68 +96,77 @@ function main()
     @spawn io_task(io_channel, OUTPUT_PATH, IO_CHUNK_SIZE)
 
     Threads.@threads for simulation_run in RUN_RANGE
-        println(simulation_run)
 
-        fixed_params = define_parameters() # need this in the loop for thread-safe RNG
+        for _ in 1:4
 
-        try
-            begin
-                dem_char_params, spatial_params, issue_structure, salience_structure,
-                question_structure, representative_params, branch_params, params_row =
-                    intitialize_simulation_run(
-                        simulation_run, design_matrix
-                    )
-            end
+            println(simulation_run)
 
-            statewide_demographic_dists, district_dists, coords = run_spatial_dist_sequence(
-                fixed_params, dem_char_params, spatial_params
-            )
+            fixed_params = define_parameters() # need this in the loop for thread-safe RNG
 
-            begin
-                voters, ideal_points, ideal_means, ideal_variances, voter_issue_weights,
-                voter_question_positions = run_voter_information_sequence(
-                    fixed_params, salience_structure, issue_structure, question_structure,
-                    district_dists
+            try
+                begin
+                    dem_char_params, spatial_params, issue_structure, salience_structure,
+                    question_structure, representative_params, branch_params, params_row =
+                        intitialize_simulation_run(
+                            simulation_run, design_matrix
+                        )
+                end
+
+                statewide_demographic_dists, district_dists, coords = run_spatial_dist_sequence(
+                    fixed_params, dem_char_params, spatial_params
                 )
+
+                begin
+                    voters, ideal_points, ideal_means, ideal_variances, voter_issue_weights,
+                    voter_question_positions = run_voter_information_sequence(
+                        fixed_params, salience_structure, issue_structure, question_structure,
+                        district_dists
+                    )
+                end
+
+                spatial_corr_measurements = run_endogeneous_param_measurement_sequence(
+                    fixed_params, district_dists, coords
+                )
+
+                prop_eval_metrics, tangian_inputs, preferred_parties = run_proportional_election_sequence(
+                    fixed_params, issue_structure, representative_params, branch_params, question_structure,
+                    ideal_points, ideal_means, ideal_variances, voter_question_positions, voter_issue_weights
+                )
+
+                begin
+                    majoritarian_eval_metrics, pluralility_evaluation_metrics, winning_candidates =
+                        run_majoritarian_sequence(
+                            fixed_params, issue_structure, branch_params, question_structure,
+                            representative_params, ideal_points, voter_question_positions,
+                            voter_issue_weights, preferred_parties
+                        )
+                end
+                party_question_positions, winning_parties, n_parties = tangian_inputs
+
+                tangian_indices = computeTangianIndices(fixed_params, issue_structure, question_structure,
+                    voter_question_positions, party_question_positions, winning_candidates, winning_parties,
+                    n_parties
+                )
+
+                results_row = run_compile_results_sequence(spatial_corr_measurements, prop_eval_metrics,
+                    majoritarian_eval_metrics, pluralility_evaluation_metrics, tangian_indices,
+                    params_row)
+
+                put!(io_channel, DataFrame([results_row]))
+
+            catch e
+
+                # Log error with simulation_run and stacktrace
+                @error "Error in simulation_run $simulation_run: $e"
+                @error "Simulation run failed on iteration $simulation_run"
+                @error "Stacktrace: $(stacktrace(e))"
+                continue
+
             end
-
-            spatial_corr_measurements = run_endogeneous_param_measurement_sequence(
-                fixed_params, district_dists, coords
-            )
-
-            prop_eval_metrics, tangian_inputs, preferred_parties = run_proportional_election_sequence(
-                fixed_params, issue_structure, representative_params, branch_params, question_structure,
-                ideal_points, ideal_means, ideal_variances, voter_question_positions, voter_issue_weights
-            )
-
-            majoritarian_eval_metrics, winning_candidates = run_majoritarian_sequence(
-                fixed_params, issue_structure, branch_params, question_structure, representative_params,
-                ideal_points, voter_question_positions, voter_issue_weights, preferred_parties
-            )
-
-            party_question_positions, winning_parties, n_parties = tangian_inputs
-
-            tangian_indices = computeTangianIndices(fixed_params, issue_structure, question_structure,
-                voter_question_positions, party_question_positions, winning_candidates, winning_parties,
-                n_parties
-            )
-
-            results_row = run_compile_results_sequence(spatial_corr_measurements, prop_eval_metrics,
-                majoritarian_eval_metrics, tangian_indices, params_row)
-
-            put!(io_channel, DataFrame([results_row]))
-
-        catch e
-
-            # Log error with simulation_run and stacktrace
-            @error "Error in simulation_run $simulation_run: $e"
-            @error "Simulation run failed on iteration $simulation_run"
-            @error "Stacktrace: $(stacktrace(e))"
-            continue
-
         end
 
     end
+
 
     close(io_channel)
 end
