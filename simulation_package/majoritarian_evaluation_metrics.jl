@@ -122,6 +122,7 @@ struct MajoritarianEvaluation
     strict_decisive_body_metrics::MajoritarianDecisiveBodyMetrics
     qualified_decisive_body_metrics::MajoritarianDecisiveBodyMetrics
     maj_gallagher_index::Float64
+    vse::Float64
 
 end
 
@@ -236,7 +237,7 @@ function compute_utilities_for_candidate_profiles(
                 for j in 1:n_candidates_per_district
                     s = 0.0
                     @inbounds for q in 1:Qᵢ
-                        s += abs(district_positions[q, i] - profile[q, j])^2
+                        s += (district_positions[q, i] - profile[q, j])^2
                     end
                     voter_utilities[seat, i, j] += -s * seat_issue_weights[i]
                 end
@@ -261,7 +262,7 @@ function evaluate_candidate_profiles(voter_question_positions::AbstractVector{Ar
         n_seats, pop_per_seat, n_issues)
 
     voter_utilities_from_candidate_profiles = HelpfulFunctions.scale_utilities(
-        voter_utilities_from_candidate_profiles
+        voter_utilities_from_candidate_profiles, 0.0, 1000.0
     )
 
     return candidate_profiles, voter_utilities_from_candidate_profiles
@@ -453,7 +454,7 @@ function evaluate_decisive_body_profile(decisive_body_profile::AbstractVector{Ar
         pop_per_seat, n_issues)
 
     voter_utilities_for_decisive_body_profile = HelpfulFunctions.scale_utilities(
-        voter_utilities_for_decisive_body_profile
+        voter_utilities_for_decisive_body_profile, 0.0, 1000.0
     )
 
     social_utility_from_body = sum(voter_utilities_for_decisive_body_profile)
@@ -565,9 +566,15 @@ function evaluate_majoritarian_election(voter_question_positions::AbstractVector
     )
     gallagher_index = find_gallagher_index(legislature_party_proportions, voter_party_proportions)
 
+    if maj_util_metrics.utility_from_winner.avg / maj_util_metrics.utility_from_maximizer.avg != 0.0
+        vse = maj_util_metrics.utility_from_winner.avg / maj_util_metrics.utility_from_maximizer.avg
+    else
+        vse = 2.0
+    end
+
     return MajoritarianEvaluation(
         maj_util_metrics, maj_eff_metrics, strict_maj_body_metrics, qualified_maj_body_metrics,
-        gallagher_index
+        gallagher_index, vse
     )
 
 end

@@ -109,6 +109,8 @@ function run_voter_information_sequence(fixed_params::FixedParams{K},
         n_issues, n_seats, pop_per_seat, issue_dimensions
     )
 
+    voter_issue_weights = HelpfulFunctions.scale_utilities(voter_issue_weights, 0.0, 1.0)
+
     ideal_points, ideal_means, ideal_variances = collect.(
         [ideal_points, ideal_means, ideal_variances]
     )
@@ -158,10 +160,12 @@ end
 
 function run_compile_results_sequence(spatial_corr_measurements::SpatialAutocorrelationMeasurement,
     prop_eval_metrics::ProportionalEvaluation, majoritarian_eval_metrics::MajoritarianEvaluation,
-    tangian_indices::TangianIndicesResults, run_parameters_column::DataFrameRow)
+    run_compile_results_sequence::MajoritarianEvaluation, tangian_indices::TangianIndicesResults,
+    run_parameters_column::DataFrameRow)
 
     measurements = HelpfulFunctions.flatten_into_dict(
-        spatial_corr_measurements, prop_eval_metrics, majoritarian_eval_metrics, tangian_indices;
+        spatial_corr_measurements, prop_eval_metrics, majoritarian_eval_metrics,
+        run_compile_results_sequence, tangian_indices;
         remove_substring="main.hashimpoecthesissimulationpackage."
     )
 

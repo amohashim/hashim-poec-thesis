@@ -1,6 +1,7 @@
 module HelpfulFunctions
 
 using DataStructures
+using LinearAlgebra
 using Random
 using Statistics
 using StaticArrays
@@ -10,7 +11,7 @@ using ..SimulationParameters
 
 export z_scale_points, scale_utilities, convert_party_ideal_points_to_arrs
 export generate_question_positions, find_issue_weights, filter_parties_below_threshold
-export flatten_into_dict
+export flatten_into_dict, find_geometric_median
 
 """
     z_scale_points_for_tangian(points::Array{Float64,3})
@@ -52,7 +53,7 @@ end
 
 
 """
-min-max scaling
+min-max scaling to [0,1]
 
 """
 function scale_utilities(profile_utilities::AbstractArray{Float64})
@@ -62,6 +63,19 @@ function scale_utilities(profile_utilities::AbstractArray{Float64})
     normalized_utilities = (profile_utilities .- min_val) ./ (max_val - min_val)
 
     return normalized_utilities
+end
+
+"""
+min-max to [a,b]
+
+"""
+function scale_utilities(profile_utilities::AbstractArray{Float64}, a::Float64, b::Float64)
+
+    min_val = minimum(profile_utilities)
+    max_val = maximum(profile_utilities)
+    normalized_utilities = (profile_utilities .- min_val) ./ (max_val - min_val)
+    scaled = normalized_utilities .* ((b - a) + a)
+    return scaled
 end
 
 function convert_party_ideal_points_to_arrs(party_ideal_points::AbstractVector{Matrix{Float64}},
@@ -104,7 +118,7 @@ function find_issue_weights(ideal_points::AbstractVector{Array{Float64,3}}, n_is
 
     end
 
-    return voter_magnitudes
+    return scale_utilities(voter_magnitudes)
 
 end
 
@@ -360,6 +374,43 @@ function generate_matrix_with_row_mean(mean, rows, cols; max_attempts=10_000)
     # If no solution is found within the max_attempts, return nothing
     println("No solution found after $max_attempts attempts.")
     return nothing
+end
+
+function find_geometric_median(points::AbstractArray; tol=1e-6, max_iter=1000)
+    """
+    Computes the geometric median of a set of points using Weiszfeld's algorithm.
+
+    Arguments:
+    - points: A matrix where each column represents a point in space (e.g., 2D or 3D).
+    - tol: Convergence tolerance for stopping criterion (default 1e-6).
+    - max_iter: Maximum number of iterations (default 1000).
+
+    Returns:
+    - The estimated geometric median as a vector.
+    """
+    n, m = size(points)  # `n`: dimensions, `m`: number of points
+    x = mean(points, dims=2)  # Start with the centroid as the initial guess
+
+    for iter in 1:max_iter
+        # Compute weights for each point
+        distances = sqrt.(sum((points .- x) .^ 2, dims=1))
+        if any(distances .== 0)
+            # If the current estimate coincides with any point, return it
+            return x
+        end
+        weights = 1.0 ./ distances
+
+        # Update estimate using weighted average
+        new_x = sum(points .* weights, dims=2) / sum(weights)
+
+        # Check for convergence
+        if norm(new_x - x) < tol
+            return new_x
+        end
+        x = new_x
+    end
+
+    error("Failed to converge within $max_iter iterations")
 end
 
 end
