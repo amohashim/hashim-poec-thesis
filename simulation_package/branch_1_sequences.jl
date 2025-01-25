@@ -235,7 +235,7 @@ function run_majoritarian_sequence(fixed_params::FixedParams{K},
     plurality_evaluation = MajoritarianEvaluationMetrics.evaluate_majoritarian_election(
         voter_question_positions, voter_issue_weights, candidates, plurality_winning_candidates,
         voter_utilities_for_candidates, preferred_parties, n_seats, pop_per_seat, n_issues,
-        n_questions, n_candidates)
+        n_questions, n_candidates; plurality=true)
 
 
     tangian_inputs = winning_candidates

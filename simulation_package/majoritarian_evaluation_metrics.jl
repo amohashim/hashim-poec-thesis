@@ -13,7 +13,7 @@ using ..CondorcetSmithFunctions
 
 export MajoritarianUtilitySummaryStats, MajoritarianUtilityMetrics
 export MajoritarianVotingEfficiencyMetrics, MajoritarianDecisiveBodyMetrics
-export MajoritarianEvaluation
+export MajoritarianEvaluation, PluratarianEvaluation
 
 struct MajoritarianUtilitySummaryStats
 
@@ -112,6 +112,17 @@ struct MajoritarianDecisiveBodyMetrics
     social_utility_from_body::Float64
     non_zero_positions::Int
     median_position::Union{Int,Float64}
+
+end
+
+struct PluratarianEvaluation
+
+    utility_metrics::MajoritarianUtilityMetrics
+    voting_efficiency_stats::MajoritarianVotingEfficiencyMetrics
+    strict_decisive_body_metrics::MajoritarianDecisiveBodyMetrics
+    qualified_decisive_body_metrics::MajoritarianDecisiveBodyMetrics
+    maj_gallagher_index::Float64
+    vse::Float64
 
 end
 
@@ -508,7 +519,7 @@ function evaluate_majoritarian_election(voter_question_positions::AbstractVector
     winning_candidates::Vector{Int}, voter_utilities_for_candidates::Array{Float64,3},
     preferred_parties::Matrix{Int}, n_seats::Int, pop_per_seat::Int,
     n_issues::Int, n_questions::AbstractVector{Int},
-    n_candidates::Int
+    n_candidates::Int; plurality::Bool=false
 )
 
     voter_rankings = ElectionSimulation.compute_voter_rankings(voter_utilities_for_candidates,
@@ -572,10 +583,17 @@ function evaluate_majoritarian_election(voter_question_positions::AbstractVector
         vse = 2.0
     end
 
-    return MajoritarianEvaluation(
-        maj_util_metrics, maj_eff_metrics, strict_maj_body_metrics, qualified_maj_body_metrics,
-        gallagher_index, vse
-    )
+    if plurality
+        return PluratarianEvaluation(
+            maj_util_metrics, maj_eff_metrics, strict_maj_body_metrics, qualified_maj_body_metrics,
+            gallagher_index, vse
+        )
+    else
+        return MajoritarianEvaluation(
+            maj_util_metrics, maj_eff_metrics, strict_maj_body_metrics, qualified_maj_body_metrics,
+            gallagher_index, vse
+        )
+    end
 
 end
 

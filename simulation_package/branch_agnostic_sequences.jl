@@ -160,12 +160,12 @@ end
 
 function run_compile_results_sequence(spatial_corr_measurements::SpatialAutocorrelationMeasurement,
     prop_eval_metrics::ProportionalEvaluation, majoritarian_eval_metrics::MajoritarianEvaluation,
-    run_compile_results_sequence::MajoritarianEvaluation, tangian_indices::TangianIndicesResults,
+    pluralility_evaluation_metrics::PluratarianEvaluation, tangian_indices::TangianIndicesResults,
     run_parameters_column::DataFrameRow)
 
     measurements = HelpfulFunctions.flatten_into_dict(
         spatial_corr_measurements, prop_eval_metrics, majoritarian_eval_metrics,
-        run_compile_results_sequence, tangian_indices;
+        pluralility_evaluation_metrics, tangian_indices;
         remove_substring="main.hashimpoecthesissimulationpackage."
     )
 
