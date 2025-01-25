@@ -1,4 +1,4 @@
-cd("/Users/alihashim/Desktop/Online_Academic_Submissions/poec_thesis/simulation_package")
+cd("/simulation_package")
 include("SimulationPackage.jl")
 
 using Base.Threads
@@ -74,9 +74,9 @@ function io_task(io_channel::Channel{DataFrame}, output_path::String, io_chunk_s
     end
 end
 
-const SUBDESIGN_FILE_NAME::String = "/Users/alihashim/Desktop/Online_Academic_Submissions/poec_thesis/design_matrix/issue_L3_cand_L2_party_L2_voter_L1.csv"
-const OUTPUT_PATH::String = "test.csv"
-const RUN_RANGE::UnitRange = 1:10
+const SUBDESIGN_FILE_NAME::String = "issue_L3_cand_L2_party_L2_voter_L1.csv"
+const OUTPUT_PATH::String = ""
+const RUN_RANGE::UnitRange = 1:1
 const IO_CHUNK_SIZE::Int = 1
 const N_THREADS::Int = 4
 
@@ -87,9 +87,9 @@ function main()
     global_logger(file_logger)  # Set the file logger as the global logger
 
     design_matrix = read_in_subdesign(SUBDESIGN_FILE_NAME)
-    # output = initialize_output_dataframe(OUTPUT_PATH)
+    output = initialize_output_dataframe(OUTPUT_PATH)
 
-    # io_run_iteration = 1
+    # # io_run_iteration = 1
     # temp_output = initialize_output_dataframe()
 
     io_channel = Channel{DataFrame}(N_THREADS * 2)
