@@ -65,30 +65,37 @@ struct ProportionalEvalMeasures
     unanimity_rate::Float64
 
     size_of_coalition::Int
+    n_parties::Int
+    n_winning_parties::Int
+    n_parties_effective::Float64
 
     function ProportionalEvalMeasures(utility_from_winner::Float64, utility_from_maximizer::Float64,
         utility_efficiency::Float64, non_zero_positions::Int, median_position::Float64,
-        unanimity::Int, unanimity_rate::Float64, size_of_coalition::Int)
+        unanimity::Int, unanimity_rate::Float64, size_of_coalition::Int, n_parties::Int,
+        n_winning_parties::Int, n_parties_effective::Float64)
 
         new(
             utility_from_winner, utility_from_maximizer, utility_efficiency, non_zero_positions,
-            median_position, unanimity, unanimity_rate, size_of_coalition
+            median_position, unanimity, unanimity_rate, size_of_coalition, n_parties,
+            n_winning_parties, n_parties_effective
         )
     end
 
     function ProportionalEvalMeasures(none::Nothing)
 
-        new(0.0, 0.0, 0.0, 0, 0, 0.0, 0.0, 0)
+        new(0.0, 0.0, 0.0, 0, 0, 0.0, 0.0, 0, 0, 0, 0)
 
     end
 
     function ProportionalEvalMeasures(utility_from_winner::Float64, utility_from_maximizer::Float64,
         utility_efficiency::Float64, non_zero_positions::Int, median_position::Float64,
-        unanimity::Int, n_seats::Int, size_of_coalition::Int)
+        unanimity::Int, n_seats::Int, size_of_coalition::Int, n_parties::Int,
+        n_winning_parties::Int, n_parties_effective::Float64)
 
         new(
             utility_from_winner, utility_from_maximizer, utility_efficiency, non_zero_positions,
-            median_position, unanimity, unanimity / n_seats, size_of_coalition
+            median_position, unanimity, unanimity / n_seats, size_of_coalition, n_parties,
+            n_winning_parties, n_parties_effective
         )
 
     end
@@ -530,6 +537,11 @@ function find_eligible_condorcet_winner(voter_utilities_for_coalition_profiles::
     n_seats::Int, pop_per_seat::Int)
 
     eligible_coalitions = find_eligible_coalitions(coalition_unanimities, n_questions)
+
+    if isempty(eligible_coalitions)
+        return nothing, nothing
+    end
+
     eligible_coalition_profile_utilities = voter_utilities_for_coalition_profiles[
         :, :, eligible_coalitions
     ]
@@ -665,7 +677,7 @@ function determine_proportional_metrics(coalition_options::Vector{Vector{Int}},
     voter_utilities_for_coalition_profiles::Array{Float64,3},
     social_utilities::Vector{Float64},
     coalition_unanimities::Vector{Int},
-    winning_parties::Dict{Int,Float64},
+    winning_parties::Dict{Int,Float64}, n_parties::Int, party_threshold::Float64,
     n_questions::AbstractVector{Int}, n_seats::Int, pop_per_seat::Int)
 
     minority_govt_elected = false
@@ -696,22 +708,21 @@ function determine_proportional_metrics(coalition_options::Vector{Vector{Int}},
         end
 
         observed_winner = minority_govt
+        minority_govt_elected = true # for all Le_L2_L2_L1, this was incorrect
 
     end
 
-    minority_govt_elected = true
-
-    unanimity = observed_winner == 0 ? 0 : coalition_unanimities[observed_winner]
+    unanimity = coalition_unanimities[observed_winner]
     size_of_coalition = length(coalition_options[observed_winner])
 
-    if observed_winner != 0
+    if !minority_govt_elected
         winner_is_condorcet, winner_in_smith_set, condorcet_paradox =
             determine_condorcet_or_smith(
                 observed_winner, voter_utilities_for_coalition_profiles,
                 coalition_unanimities, n_questions, n_seats, pop_per_seat
             )
     else
-        winner_is_condorcet, winner_in_smith_set, condorcet_paradox = false, false, false
+        winner_is_condorcet, winner_in_smith_set, condorcet_paradox = false, true, true
     end
 
     utility_of_winner, utility_from_maxer, utility_efficiency, utility_maxer_elected =
@@ -722,20 +733,21 @@ function determine_proportional_metrics(coalition_options::Vector{Vector{Int}},
     non_zero_positions = count(!iszero, vcat(coalition_profiles...)[:, :, observed_winner])
     median_positions = median(vcat(coalition_profiles...)[:, :, observed_winner])
 
-
     prop_minco = ProportionalEvalMinorityGovt(minority_govt_elected,
         minority_govt_unstable, size_minority_govt
     )
-
 
     indicators = [
         prop_minco, single_party_win, winner_is_condorcet, winner_in_smith_set, condorcet_paradox,
         utility_maxer_elected, election_failed
     ]
 
+    n_winning_parties = count(values(winning_parties) .> party_threshold)
+    n_parties_effective = 1.0 / sum(values(winning_parties) .^ 2) # Laasko and Taagepra/Herfindahl-Hirschman index
+
     prop_eval_measures = ProportionalEvalMeasures(utility_of_winner, utility_from_maxer,
         utility_efficiency, non_zero_positions, median_positions, unanimity, n_seats,
-        size_of_coalition)
+        size_of_coalition, n_parties, n_winning_parties, n_parties_effective)
 
     pop_eval_indicators = ProportionalEvalIndicators(indicators...)
 
@@ -751,7 +763,7 @@ function evaluate_proportional_election(
     winning_parties::Dict{Int,Float64}, raw_vote_counts::AbstractDict{Int,Int},
     n_parties::Int, n_issues::Int, n_questions::AbstractVector{Int},
     issue_dimensions::AbstractVector{Int},
-    n_seats::Int, pop_per_seat::Int) # winning parties should be true, over-threshold winning parties
+    n_seats::Int, pop_per_seat::Int, party_threshold::Float64) # winning parties should be true, over-threshold winning parties
 
     party_issue_weights = find_issue_weights(party_ideal_points, n_issues, 1, n_parties,
         issue_dimensions)
@@ -801,7 +813,7 @@ function evaluate_proportional_election(
     utils_strict, indicators_strict = determine_proportional_metrics(
         coalition_options, strict_coalition_profiles, party_utilities_for_strict_coalition_profiles,
         voter_utilities_for_strict_coalition_profiles, strict_social_utilities,
-        coalition_unanimities, winning_parties,
+        coalition_unanimities, winning_parties, n_parties, party_threshold,
         n_questions, n_seats, pop_per_seat
     )
 
@@ -809,7 +821,7 @@ function evaluate_proportional_election(
         coalition_options, qualified_coalition_profiles,
         party_utilities_for_qualified_coalition_profiles,
         voter_utilities_for_qualified_coalition_profiles, qualified_social_utilities,
-        coalition_qualified_unanimities, winning_parties,
+        coalition_qualified_unanimities, winning_parties, n_parties, party_threshold,
         n_questions, n_seats, pop_per_seat
     )
 

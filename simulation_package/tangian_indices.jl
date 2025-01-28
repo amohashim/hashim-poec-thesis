@@ -67,12 +67,18 @@ function computeTangianIndices(
     party_question_positions::Vector{Array{Float64,3}},
     election_winners::Vector{Int},
     proportional_election_results::Dict{Int,Float64},
-    n_parties::Int
+    n_parties::Int; single_collapsed_space::Bool=false
 )
 
     @unpack n_seats, pop_per_seat = fixed_params
     @unpack n_questions, n_positions = question_structure
     @unpack n_issues = issue_structure
+
+    if single_collapsed_space
+        n_issues = 1
+        n_questions = [sum(n_questions)]
+        n_positions = [n_positions[1]]
+    end
 
     ############################################################################
     ## 1) Precompute totals for normalizations
@@ -82,6 +88,7 @@ function computeTangianIndices(
     total_decomposed = 0
     # Summation of Q_k (the original question count)
     total_questions = 0
+
     @inbounds for k_ in 1:n_issues
         total_decomposed += n_questions[k_] * n_positions[k_]
         total_questions += n_questions[k_]
@@ -273,145 +280,6 @@ function computeTangianIndices(
     #     raw_uni_parties=raw_uni_parties,
     #     adj_uni_parties=adj_uni_parties
     # )
-end
-
-end # module
-
-module TangianIndicesRedone
-
-using StaticArrays
-using Statistics
-
-function computeTangianIndicesFixed(
-    question_positions::Vector{Array{Float64,3}},
-    party_question_positions::Vector{Array{Float64,3}},
-    election_winners::Vector{Int},
-    proportional_election_results::Dict{Int,Float64},
-    N_QUESTIONS::SVector{n_issues,Int},
-    N_POSITIONS::SVector{n_issues,Int},
-    K::Int,
-    N::Int,
-    A::Int,
-    N_PARTIES::Int
-) where {n_issues}
-    # Precompute denominators
-    total_raw_questions = sum(N_QUESTIONS[k_] * N_POSITIONS[k_] for k_ in 1:K)
-    total_adj_questions = sum(N_QUESTIONS[k_] for k_ in 1:K)
-
-    # Preallocate outputs
-    raw_pop_candidates = zeros(Float64, N)
-    adj_pop_candidates = zeros(Float64, N)
-    raw_uni_candidates = zeros(Float64, N)
-    adj_uni_candidates = zeros(Float64, N)
-
-    # Helper for district-level calculations
-    function compute_district_indices(c::Int, n_::Int)
-        raw_numer_pop = 0.0
-        raw_numer_uni = 0.0
-        adj_numer_pop = 0.0
-        adj_numer_uni = 0.0
-
-        for k_ in 1:K
-            Qk, Pk = N_QUESTIONS[k_], N_POSITIONS[k_]
-            arr_k = question_positions[k_]
-
-            for q_ in 1:Qk
-                chosen_pos = arr_k[q_, n_, c]
-                match_count = sum(arr_k[q_, n_, i_] == chosen_pos for i_ in 1:A)
-                fraction_local = match_count / A
-
-                # Raw indices
-                raw_numer_pop += fraction_local * Pk
-                if fraction_local >= 0.5
-                    raw_numer_uni += Pk
-                end
-
-                # Adjusted indices
-                adj_numer_pop += fraction_local
-                if fraction_local >= 0.5
-                    adj_numer_uni += 1
-                end
-            end
-        end
-
-        return (
-            raw_numer_pop / total_raw_questions,
-            adj_numer_pop / total_adj_questions,
-            raw_numer_uni / total_raw_questions,
-            adj_numer_uni / total_adj_questions
-        )
-    end
-
-    # Compute candidate indices
-    for n_ in 1:N
-        c = election_winners[n_]
-        raw_pop_candidates[n_], adj_pop_candidates[n_], raw_uni_candidates[n_], adj_uni_candidates[n_] =
-            compute_district_indices(c, n_)
-    end
-
-    # Aggregate for decisive body
-    raw_pop_body = mean(raw_pop_candidates)
-    adj_pop_body = mean(adj_pop_candidates)
-    raw_uni_body = mean(raw_uni_candidates)
-    adj_uni_body = mean(adj_uni_candidates)
-
-    # Helper for party-level calculations
-    function compute_party_indices(p::Int)
-        raw_numer_pop = 0.0
-        raw_numer_uni = 0.0
-        adj_numer_pop = 0.0
-        adj_numer_uni = 0.0
-
-        for k_ in 1:K
-            Qk, Pk = N_QUESTIONS[k_], N_POSITIONS[k_]
-            arr_voters, arr_party = question_positions[k_], party_question_positions[k_]
-
-            for q_ in 1:Qk
-                chosen_pos = arr_party[q_, 1, p]
-                match_count = sum(arr_voters[q_, n_, i_] == chosen_pos for n_ in 1:N, i_ in 1:A)
-                fraction_whole = match_count / (N * A)
-
-                # Raw indices
-                raw_numer_pop += fraction_whole * Pk
-                if fraction_whole >= 0.5
-                    raw_numer_uni += Pk
-                end
-
-                # Adjusted indices
-                adj_numer_pop += fraction_whole
-                if fraction_whole >= 0.5
-                    adj_numer_uni += 1
-                end
-            end
-        end
-
-        return (
-            raw_numer_pop / total_raw_questions,
-            adj_numer_pop / total_adj_questions,
-            raw_numer_uni / total_raw_questions,
-            adj_numer_uni / total_adj_questions
-        )
-    end
-
-    # Compute party indices
-    raw_pop_parties = 0.0
-    adj_pop_parties = 0.0
-    raw_uni_parties = 0.0
-    adj_uni_parties = 0.0
-
-    for (p, vote_share) in proportional_election_results
-        raw_pop, adj_pop, raw_uni, adj_uni = compute_party_indices(p)
-        raw_pop_parties += vote_share * raw_pop
-        adj_pop_parties += vote_share * adj_pop
-        raw_uni_parties += vote_share * raw_uni
-        adj_uni_parties += vote_share * adj_uni
-    end
-
-    return TangianIndicesResults(
-        raw_pop_body, adj_pop_body, raw_uni_body, adj_uni_body,
-        raw_pop_parties, adj_pop_parties, raw_uni_parties, adj_uni_parties
-    )
-
 end
 
 end # module

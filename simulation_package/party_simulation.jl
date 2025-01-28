@@ -5,13 +5,17 @@
 
 module PartySimulation
 
-using LinearAlgebra, Random, MultivariateStats, Clustering, Statistics, StatsBase
-using Distributions, StaticArrays
-# We'll use these packages if they're installed:
-# ] add MultivariateStats, Clustering
-# import MultivariateStats: fit, transform, PCA
-# import Clustering: dbscan
+using LinearAlgebra
+using Random
+using MultivariateStats
+using Clustering
+using Statistics
+using StatsBase
+using Distributions
+using Distances
+using StaticArrays
 
+using ..HelpfulFunctions
 export structured_noise_parties,
     compute_engagement,
     remodel_issue_space,
@@ -24,7 +28,7 @@ Given an `I`-vector of variance vectors, build an `I`-vector of diagonal covaria
 where each matrix has dimension `d_i x d_i`. By default, each variance is scaled by `V_P`.
 Returns a `Vector{Matrix{Float64}}` of length `I`.
 """
-function build_covariances(ideal_point_variances::Vector{Vector{Float64}}, n_issues::Int)
+function build_covariances(ideal_point_variances::AbstractVector{Vector{Float64}}, n_issues::Int)
 
     covariances = Vector{Matrix{Float64}}(undef, n_issues)
     @inbounds for i in 1:n_issues
@@ -115,16 +119,16 @@ Produces N x A matricies where rows are districts and columns are meaningless
 engagement is a matrix of floats, each entry represents an individuals' computed engagement
 is_political_class is a bit matrix, each entry represents whether an individual is political 
 """
-function compute_engagement(pop_issues::Vector{Array{Float64,3}}, alpha::Float64, p::Float64,
-    rng::AbstractRNG)
-    M = length(pop_issues)
-    # assume all have same N, A
-    (N, A, dfirst) = size(pop_issues[1])
-    engagement = zeros(Float64, N, A)
-    for n in 1:N
-        for a in 1:A
+function compute_engagement(pop_issues::AbstractVector{Array{Float64,3}}, alpha::Float64,
+    p::Float64, n_issues::Int, n_seats::Int, pop_per_seat::Int, rng::AbstractRNG; scale::Bool=true)
+
+    engagement = zeros(Float64, n_seats, pop_per_seat)
+
+    # Minkowski norm
+    for n in 1:n_seats
+        for a in 1:pop_per_seat
             sum_ = 0.0
-            for i in 1:M
+            for i in 1:n_issues
                 arr_i = pop_issues[i]
                 d_i = size(arr_i, 3)
                 mag = norm(view(arr_i, n, a, :))
@@ -134,10 +138,15 @@ function compute_engagement(pop_issues::Vector{Array{Float64,3}}, alpha::Float64
             engagement[n, a] = E_na
         end
     end
+
+    if scale
+        engagement = scale_utilities(engagement)
+    end
+
     # Bernoulli
-    is_political_class = falses(N, A)
-    for n in 1:N
-        for a in 1:A
+    is_political_class = falses(n_seats, pop_per_seat)
+    for n in 1:n_seats
+        for a in 1:pop_per_seat
             prob = alpha * engagement[n, a]
             prob = prob > 1.0 ? 1.0 : prob
             if rand(rng) < prob
@@ -156,32 +165,20 @@ index_map: Vector of (n,a) pairs
 # NEED TO CHECK COMPUTATIONS HERE, MAKE SURE IT'S MAPPING INTO THE SALIENCE SPACE CORRECTLY
 """
 
-function remodel_issue_space(pop_issues::Vector{Array{Float64,3}})
-    M = length(pop_issues)
-    # Extract N and A from the first issue
-    (N, A, _) = size(pop_issues[1])
+function remodel_issue_space(pop_issues::AbstractVector{Array{Float64,3}}, n_issues::Int,
+    n_seats::Int, pop_per_seat::Int, issue_dimensions::AbstractVector{Int})
 
-    # Ensure all issues have the same N and A
-    for i in 2:M
-        current_size = size(pop_issues[i])
-        if current_size[1] != N || current_size[2] != A
-            throw(ArgumentError("All pop_issues must have the same number of nodes (N) and agents per node (A)."))
-        end
-    end
-
-    # Determine the total dimensionality after concatenation
-    dims = [size(pop_issues[i], 3) for i in 1:M]
-    sum_d = sum(dims)
+    sum_d = sum(issue_dimensions)
 
     # Initialize super_issue matrix
-    super_issue = zeros(Float64, N * A, sum_d)
+    super_issue = zeros(Float64, n_seats * pop_per_seat, sum_d)
 
     # Populate super_issue
-    for rowidx in 1:(N*A)
-        n = div(rowidx - 1, A) + 1  # Node index
-        a = rem(rowidx - 1, A) + 1  # Agent index
+    for rowidx in 1:(n_seats*pop_per_seat)
+        n = div(rowidx - 1, pop_per_seat) + 1  # Node index
+        a = rem(rowidx - 1, pop_per_seat) + 1  # Agent index
         offset = 1
-        for i in 1:M
+        for i in 1:n_issues
             arr_i = pop_issues[i]
             vec_i = arr_i[n, a, :]  # Extract the vector for node n, agent a, issue i
             mag_i = norm(vec_i)
@@ -197,18 +194,18 @@ function remodel_issue_space(pop_issues::Vector{Array{Float64,3}})
     return super_issue
 end
 
-function apply_pca(super_issue_points::Matrix{Float64}, M::Int64)
+function apply_pca(super_issue_points::Matrix{Float64}, n_issues::Int)
     println("Reducing points")
     X = super_issue_points'
-    pca_model = fit(PCA, X; maxoutdim=M)
+    pca_model = fit(PCA, X; maxoutdim=n_issues)
 
     # Ensure the output has exactly M dimensions
     reduced_transposed = transform(pca_model, X)  # Reduced data in (M_actual × observations)
-    actual_M = size(reduced_transposed, 1)
+    actual_n_issues = size(reduced_transposed, 1)
 
-    if actual_M < M
+    if actual_n_issues < n_issues # n issues
         # Add zero-padded dimensions if fewer than M components are returned
-        padding = zeros(M - actual_M, size(reduced_transposed, 2))
+        padding = zeros(n_issues - actual_n_issues, size(reduced_transposed, 2))
         reduced_transposed = vcat(reduced_transposed, padding)
     end
 
@@ -219,15 +216,17 @@ end
 
 function subsample_political_points(
     reduced_points::Matrix{Float64},
-    flat_pc::Vector{Bool},
+    flat_pc::Union{Vector{Bool},BitVector},
     max_sample_size::Int
 )
     political_indices = findall(flat_pc)
+    total_pop = length(flat_pc)
     num_political = length(political_indices)
 
     if num_political <= max_sample_size
         # If there are fewer points than the maximum sample size, return all political points
-        return reduced_points[political_indices, :], political_indices
+        sampled_indices = sample(1:total_pop, max_sample_size; replace=false)
+        return reduced_points[sampled_indices, :], sampled_indices
     else
         # Randomly sample without replacement
         sampled_indices = sample(political_indices, max_sample_size; replace=false)
@@ -236,7 +235,7 @@ function subsample_political_points(
 end
 
 
-function kmeans_model_selection(sampled_points::Matrix{Float64}, k_range::UnitRange{Int64}, M::Int64)
+function kmeans_model_selection(sampled_points::Matrix{Float64}, k_range::UnitRange{Int64})
     best_k = nothing
     best_score = -Inf
     best_labels = nothing
@@ -270,35 +269,55 @@ end
 
 function dimension_reduce_and_cluster_with_kmeans(
     super_issue_points::Matrix{Float64},
-    is_political_class::Matrix{Bool},
-    M::Int64;
+    is_political_class::Union{Matrix{Bool},BitMatrix},
+    n_issues::Int,
     k_range::UnitRange{Int64}=2:10,
-    max_sample_size::Int64=5000
+    max_sample_size::Int=5000,
+    min_sample_size::Int=5000
 )
     # flatten matrix into vector for indexing
     flat_pc = vec(is_political_class)
 
     # reducing points
-    reduced_points = apply_pca(super_issue_points, M)  # Ensure this function is defined!
+    reduced_points = apply_pca(super_issue_points, n_issues)  # Ensure this function is defined!
 
     # subsampling
     # sampled_indices was meant for labeling clusters
-    sampled_points, sampled_indices = subsample_political_points(reduced_points, flat_pc, max_sample_size)
+    sampled_points, sampled_indices = subsample_political_points(
+        reduced_points, flat_pc, max_sample_size
+    )
 
     # for edge cases
-    if size(sampled_points, 1) < 2
+    if size(sampled_points, 1) < min_sample_size
         println("Not enough points to cluster. Returning defaults.")
-        full_labels = fill(-1, size(reduced_points, 1))
-        party_positions = Matrix{Float64}(undef, 0, M)
+        full_labels = rand([-1, 1], size(reduced_points, 1))
+        party_positions = Matrix{Float64}(undef, 0, n_issues)
         return reduced_points, full_labels, party_positions
     end
 
     # iterative k-means clustering
     # political_labels was meant for labeling clusters
-    political_labels, party_positions = kmeans_model_selection(sampled_points, k_range, M)
+    political_labels, party_positions = kmeans_model_selection(sampled_points, k_range)
 
     return reduced_points, party_positions
 end
+
+"""
+    recover_3d_after_pca(reduced_points, N, A)
+
+`reduced_points` must be size (N*A) x M, where M is the new dimension
+(e.g., after PCA). Returns a (N, A, M) array.
+"""
+@inline function recover_3d_after_pca(reduced_points::Matrix{Float64}, n_issues::Int,
+    n_seats::Int, pop_per_seat::Int)
+
+    # Step 1: reshape to (A, N, M) so that dimension 1 = 'a' (the fastest index)
+    tmp = reshape(reduced_points, (pop_per_seat, n_seats, n_issues))
+
+    # Step 2: permute to get (N, A, M)
+    return permutedims(tmp, (2, 1, 3))
+end
+
 
 module TestingClustering
 

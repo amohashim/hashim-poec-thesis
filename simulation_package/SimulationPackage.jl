@@ -6,7 +6,7 @@ export SpatialCharacteristics, SimulateIssuePreferences, SimulateQuestionPrefere
 export PartySimulation, CandidateSimulation, ElectionSimulation
 export CondorcetSmithFunctions, ProportionalEvaluationMetrics, MajoritarianEvaluationMetrics
 export TangianIndices
-export BranchAgnosticSequences, Branch1Sequences
+export BranchAgnosticSequences, Branch1Sequences, Branch2Sequences
 
 include("simulation_parameters.jl")
 include("helpful_functions.jl")
@@ -24,6 +24,7 @@ include("majoritarian_evaluation_metrics.jl")
 include("tangian_indices.jl")
 include("branch_agnostic_sequences.jl")
 include("branch_1_sequences.jl")
+include("branch_2_sequences.jl")
 
 
 end

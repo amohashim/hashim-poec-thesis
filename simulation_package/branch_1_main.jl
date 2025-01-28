@@ -1,4 +1,4 @@
-cd("/simulation_package")
+cd("/Users/alihashim/Desktop/Online_Academic_Submissions/poec_thesis/simulation_package")
 include("SimulationPackage.jl")
 
 using Base.Threads
@@ -74,10 +74,10 @@ function io_task(io_channel::Channel{DataFrame}, output_path::String, io_chunk_s
     end
 end
 
-const SUBDESIGN_FILE_NAME::String = "issue_L3_cand_L2_party_L2_voter_L1.csv"
+const SUBDESIGN_FILE_NAME::String = "/Users/alihashim/Desktop/Online_Academic_Submissions/poec_thesis/design_matrix/issue_L3_cand_L2_party_L2_voter_L1.csv"
 const OUTPUT_PATH::String = ""
-const RUN_RANGE::UnitRange = 1:1
-const IO_CHUNK_SIZE::Int = 1
+const RUN_RANGE::UnitRange = 4001:6000
+const IO_CHUNK_SIZE::Int = 100
 const N_THREADS::Int = 4
 
 function main()
