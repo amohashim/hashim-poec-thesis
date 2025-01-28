@@ -51,7 +51,8 @@ end
 
 function run_voter_information_sequence(fixed_params::FixedParams{K},
     salience_structure::SalienceStructure{K,J}, issue_structure::IssueStructure{J},
-    question_structure::QuestionStructure{J}, district_dists::Array{Float64,3}
+    question_structure::QuestionStructure{J}, district_dists::Array{Float64,3};
+    return_only_voters_and_ideal_points::Bool=false
 ) where {K,J}
 
     @unpack n_characteristics, salience_to_probs, pop_per_seat, n_seats, rng = fixed_params
@@ -105,17 +106,23 @@ function run_voter_information_sequence(fixed_params::FixedParams{K},
             )
     end
 
-    voter_issue_weights = HelpfulFunctions.find_issue_weights(ideal_points,
-        n_issues, n_seats, pop_per_seat, issue_dimensions
-    )
-
-    voter_issue_weights = HelpfulFunctions.scale_utilities(voter_issue_weights, 0.0, 1.0)
-
     ideal_points, ideal_means, ideal_variances = collect.(
         [ideal_points, ideal_means, ideal_variances]
     )
 
     ideal_points = SVector{n_issues,Array{Float64,3}}(ideal_points)
+
+    if return_only_voters_and_ideal_points
+
+        return voters, ideal_points
+
+    end
+
+    voter_issue_weights = HelpfulFunctions.find_issue_weights(ideal_points,
+        n_issues, n_seats, pop_per_seat, issue_dimensions
+    )
+
+    voter_issue_weights = HelpfulFunctions.scale_utilities(voter_issue_weights, 0.0, 1.0)
 
     voter_question_positions = SimulateQuestionPreferences.generate_question_positions(
         issue_dimensions, n_issues, n_questions, n_positions, ideal_points, gamma,

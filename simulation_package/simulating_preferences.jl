@@ -801,7 +801,10 @@ end
 
 """
 Vector of N x A x Q_i arrays, where Q_i is the number of questions in a given issue.
-So, question_positions[1][1,1,:] gives us the positions of agent 1 on 
+So, question_positions[1][1,1,:] gives us the positions of agent 1 on;
+
+if `single_dimension_concat` is true, then the questions are generated with the first element 
+    of `n_positions`
 
 """
 function generate_question_positions(issue_dimensions::AbstractVector{Int}, n_issues::Int,
