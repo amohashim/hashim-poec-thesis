@@ -79,9 +79,9 @@ function io_task(io_channel::Channel{DataFrame}, output_path::String, io_chunk_s
 end
 
 const SUBDESIGN_FILE_NAME::String = "/Users/alihashim/Desktop/Online_Academic_Submissions/poec_thesis/design_matrix/issue_L1_party_L2_cand_L2_voter_L2.csv"
-const OUTPUT_PATH::String = "L1_L1_L2_L1_1_to_10_5_replications.csv"
-const RUN_RANGE::UnitRange = 1:10
-const IO_CHUNK_SIZE::Int = 1
+const OUTPUT_PATH::String = "L1_L2_L2_L2_25001_to_35000_replications.csv"
+const RUN_RANGE::UnitRange = 25001:35000
+const IO_CHUNK_SIZE::Int = 100
 const N_THREADS::Int = 4
 
 function main()
@@ -101,7 +101,7 @@ function main()
 
     Threads.@threads for simulation_run in RUN_RANGE
 
-        for _ in 1:5
+        for _ in 1:1
 
             println(simulation_run)
 
@@ -134,8 +134,8 @@ function main()
                     prop_eval_metrics, tangian_inputs, preferred_parties,
                     voter_ideal_points, voter_question_positions, voter_issue_weights =
                         run_proportional_election_sequence(
-                            fixed_params, issue_structure, representative_params, branch_params,
-                            question_structure, voter_ideal_points
+                            fixed_params, issue_structure, representative_params, question_structure,
+                            branch_params, voter_ideal_points
                         )
                 end
 

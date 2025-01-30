@@ -7,7 +7,7 @@ using StaticArrays
 using LinearAlgebra: norm
 using DataStructures
 
-export poll_district, expected_policy_utility
+export poll_district!, expected_policy_utility
 
 """
 
@@ -893,9 +893,9 @@ using StaticArrays
 using LinearAlgebra: norm
 using DataStructures
 
-using ..ElectionSimulation: poll_district, expected_policy_utility
+using ..ElectionSimulation: poll_district!, expected_policy_utility
 using ..HelpfulFunctions: scale_utilities
-using ..CandidatesSimulation: build_candidate_utilities_multi_issue
+using ..CandidateSimulation: build_candidate_utilities_multi_issue
 
 """
     build_candidate_ideal_points_for_issue(
@@ -1227,7 +1227,7 @@ function example_script()
 
     seat = 7
     # for a given district
-    U1_seat, U2_seat = CandidatesSimulation.build_candidate_utilities_multi_issue(
+    U1_seat, U2_seat = CandidateSimulation.build_candidate_utilities_multi_issue(
         voter_ideal_points, voter_question_positions, candidates, seat, issue_dimensions,
         n_questions
     )
