@@ -65,10 +65,10 @@ function generate_RepresentativesParams(factor_G_level::String, factor_H_level::
 
     α_political_class = FACTOR_G_LOOKUP_TABLE_ALPHA[factor_G_level]
     p_norm = FACTOR_G_LOOKUP_TABLE_P[factor_G_level]
-    party_threshold = FACTOR_H_LOOKUP_TABLE[factor_H_level]
     α_candidate_entry = FACTOR_I_LOOKUP_TABLE[factor_I_level]
+    party_threshold = FACTOR_H_LOOKUP_TABLE[factor_H_level]
 
-    return RepresentativesParams(α_political_class, p_norm, party_threshold, α_candidate_entry)
+    return RepresentativesParams(α_political_class, p_norm, α_candidate_entry, party_threshold)
 
 end
 
@@ -79,10 +79,10 @@ function generate_BranchParams(factor_J_level::String, factor_K_level::String,
     n_candidates = FACTOR_K_LOOKUP_TABLE[factor_K_level]
     turnout_level = FACTOR_L_LOOKUP_TABLE[factor_L_level]
     strategic_level = FACTOR_M_LOOKUP_TABLE[factor_M_level]
-    demographic_attitudes = FACTOR_N_LOOKUP_TABLE[factor_N_level]
+    directional_utility = FACTOR_N_LOOKUP_TABLE[factor_N_level]
 
-    return BranchParams(
-        n_parties, n_candidates, turnout_level, strategic_level, demographic_attitudes
+    return BranchParams{1}(
+        n_parties, n_candidates, turnout_level, strategic_level, directional_utility
     )
 
 end

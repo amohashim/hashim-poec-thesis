@@ -1,6 +1,7 @@
 module CandidateSimulation
 
 using Random, LinearAlgebra
+using ..HelpfulFunctions: scale_utilities
 
 
 """
@@ -260,5 +261,149 @@ function build_candidate_utilities_for_issue(
 
     return U1_n, U2_n
 end
+
+"""
+    build_candidate_utilities_multi_issue(
+        pop_issues_ideal::Vector{Array{Float64,3}},     # length M, each size (N, A, d_i)
+        pop_issues_positions::Vector{Array{Float64,3}}, # length M, each size (Q_i, N, A)
+        candidate_list_by_district::Vector{Vector{Int}},
+        n::Int,
+        dims_issues::Vector{Int},  # length M, dims_issues[i] = d_i
+        Q_counts::Vector{Int}      # length M, Q_counts[i] = Q_i
+    ) -> (U1_n, U2_n)
+
+Computes U1 and U2 for all candidates in district `n`, summing across M issues.
+
+Model:
+------
+  U1(c) = sum_{q in all_issues} ( || c_{I_q} ||/ sqrt(d_{I_q}) )
+           * sqrt(1 + totalQ)
+
+  U2(c,j) = sum_{q in Q^c}  ( || c_{I_q} || / sqrt(d_{I_q}) ) * sqrt(1+|Q^c|)
+            - sum_{q in Q'} ( || c_{I_q} || / sqrt(d_{I_q}) ) * |pos_c[q] - pos_j[q]|
+
+where:
+  - M = length(pop_issues_ideal) = number of issues
+  - For each issue i, pop_issues_ideal[i] is shape (N, A, d_i),
+    pop_issues_positions[i] is shape (Q_i, N, A).
+  - candidate_list_by_district[n] is a list of agent indices 
+    (1..A) who are running in district n.
+  - dims_issues[i] = d_i
+  - Q_counts[i] = Q_i
+"""
+function build_candidate_utilities_multi_issue(
+    pop_issues_ideal::AbstractVector{Array{Float64,3}},
+    pop_issues_positions::Vector{Array{Float64,3}},
+    candidate_list_by_district::Vector{Vector{Int}},
+    n::Int,
+    dims_issues::AbstractVector{Int},
+    Q_counts::AbstractVector{Int}
+)
+
+    M = length(pop_issues_ideal)  # number of issues
+    cands = candidate_list_by_district[n]
+    numCands = length(cands)
+
+    # 1) Precompute M_c[i_issue] = norm_of_ideal(c, i_issue) / sqrt(dims_issues[i_issue])
+    #    For each candidate c, for each issue i.
+    #    We'll store in M_c[c_local, i_issue].
+    M_c = Matrix{Float64}(undef, numCands, M)
+    for (i_local, a_c) in enumerate(cands)
+        for i_issue in 1:M
+            # agent a_c's ideal point in issue i_issue, shape (d_i,)
+            mag = norm(@view pop_issues_ideal[i_issue][n, a_c, :])
+            M_c[i_local, i_issue] = mag / sqrt(dims_issues[i_issue])
+        end
+    end
+
+    # 2) Compute totalQ = sum(Q_counts[i]) across all issues
+    totalQ = sum(Q_counts)
+
+    # 3) Build U1. 
+    #    For candidate c: sum_{i=1..M} [Q_counts[i]* M_c[c,i]]  * sqrt(1+ totalQ)
+    U1_n = Vector{Float64}(undef, numCands)
+    for c_local in 1:numCands
+        sum_ = 0.0
+        @inbounds for i_issue in 1:M
+            sum_ += Q_counts[i_issue] * M_c[c_local, i_issue]
+        end
+        U1_n[c_local] = sum_ * sqrt(1 + totalQ)
+    end
+
+    # 4) Prepare accumulators for U2
+    #    same_count[c,j], sum_same[c,j], sum_diff[c,j]
+    same_count = zeros(Int, numCands, numCands)
+    sum_same = zeros(Float64, numCands, numCands)
+    sum_diff = zeros(Float64, numCands, numCands)
+
+    # We'll do a double loop over candidate pairs (c_local, j_local).
+    # Then we'll loop over each issue, then each question in that issue.
+    # For each question, if c_q == j_q => same. 
+    # else => differ => we add M_c[c_local, i_issue]*abs(c_q-j_q).
+    #
+    # We'll fill symmetrical entries too.
+
+    for c_local in 1:numCands
+        for j_local in c_local+1:numCands
+            s_cnt = 0
+            s_same = 0.0
+            s_diff = 0.0
+
+            # loop over issues
+            for i_issue in 1:M
+                # # questions for this issue
+                Q_i = Q_counts[i_issue]
+                # a_c, a_j are global agent IDs for these local indices
+                a_c = cands[c_local]
+                a_j = cands[j_local]
+
+                # candidate c's "normalized magnitude" for issue i => M_c[c_local, i_issue]
+                # We'll add M_c[c_local, i_issue] each time c_q == j_q.
+                # We'll add M_c[c_local, i_issue]* abs(...) each time they differ.
+
+                # loop over each question q in that issue
+                for q in 1:Q_i
+                    # c_q => pop_issues_positions[i_issue][q, n, a_c]
+                    # j_q => pop_issues_positions[i_issue][q, n, a_j]
+                    local_c_q = pop_issues_positions[i_issue][q, n, a_c]
+                    local_j_q = pop_issues_positions[i_issue][q, n, a_j]
+
+                    if local_c_q == local_j_q
+                        s_cnt += 1
+                        s_same += M_c[c_local, i_issue]
+                    else
+                        s_diff += M_c[c_local, i_issue] * abs(local_c_q - local_j_q)
+                    end
+                end
+            end
+
+            same_count[c_local, j_local] = s_cnt
+            same_count[j_local, c_local] = s_cnt
+            sum_same[c_local, j_local] = s_same
+            sum_same[j_local, c_local] = s_same
+            sum_diff[c_local, j_local] = s_diff
+            sum_diff[j_local, c_local] = s_diff
+        end
+    end
+
+    # 5) Build U2 from same_count, sum_same, sum_diff
+    U2_n = zeros(Float64, numCands, numCands)
+
+    for c_local in 1:numCands
+        for j_local in 1:numCands
+            if c_local == j_local
+                U2_n[c_local, j_local] = 0.0
+            else
+                sc = same_count[c_local, j_local]
+                # sum_same[c_local,j_local] * sqrt(1 + sc) - sum_diff[c_local,j_local]
+                U2_n[c_local, j_local] =
+                    sum_same[c_local, j_local] * sqrt(1 + sc) - sum_diff[c_local, j_local]
+            end
+        end
+    end
+
+    return scale_utilities(U1_n, 0.0, 1000.0), scale_utilities(U2_n, 0.0, 1000.0)
+end
+
 
 end

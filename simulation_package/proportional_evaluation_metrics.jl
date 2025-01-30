@@ -111,38 +111,36 @@ struct ProportionalEvaluation
     strict_measures::ProportionalEvalMeasures
 
     prop_gallagher_index::Float64
+    prop_true_gallagher_index::Float64
 
 end
 
-function allocate_by_dhondt(n_seats::Int, winner_vote_counts::AbstractDict{Int,Int})
-    # N: Total number of seats to allocate
-    # votes: Dictionary of party (key) to vote total (value)
-
-
-    # Initialize a dictionary to track allocated seats
+function allocate_by_dhondt(n_seats::Int, winner_vote_counts::Dict{Int,Int})
+    # Initialize seat counts to zero
     seats = Dict(party => 0 for party in keys(winner_vote_counts))
 
-    # Generate a priority queue of (quotient, party) pairs
-    quotients = [(winner_vote_counts[party] / 1, party) for party in keys(winner_vote_counts)]
+    # Keep current "D'Hondt quotients" in a dictionary too:
+    quotients = Dict(party => float(winner_vote_counts[party]) for party in keys(winner_vote_counts))
 
-    # Repeat for each seat
+    # Allocate seats one at a time
     for _ in 1:n_seats
-        # Find the party with the largest quotient
-        max_quotient, winning_party = findmax(quotients)
+        # Find the party with the largest current quotient
+        # findmax(...) returns (value, key), so use the second item for the party
+        best_val, best_party = findmax(quotients)
 
-        # Allocate a seat to the winning party
-        seats[winning_party] += 1
+        # Allocate a seat to that party
+        seats[best_party] += 1
 
-        # Update the quotient for the winning party
-        updated_divisor = seats[winning_party] + 1
-        quotients[winning_party] = (winner_vote_counts[winning_party] / updated_divisor,
-            winning_party)
+        # Update that party’s quotient = votes / (seats_already_won + 1)
+        new_divisor = seats[best_party] + 1
+        quotients[best_party] = winner_vote_counts[best_party] / new_divisor
     end
 
-    seats_props = Dict{Int,Float64}(party => seats_won / n_seats for (party, seats_won) in seats)
-
+    # Convert seat counts to proportions
+    seats_props = Dict{Int,Float64}(party => seats[party] / n_seats for party in keys(seats))
     return seats_props
 end
+
 
 function build_coalition_options(n_parties::Int)
 
@@ -763,7 +761,8 @@ function evaluate_proportional_election(
     winning_parties::Dict{Int,Float64}, raw_vote_counts::AbstractDict{Int,Int},
     n_parties::Int, n_issues::Int, n_questions::AbstractVector{Int},
     issue_dimensions::AbstractVector{Int},
-    n_seats::Int, pop_per_seat::Int, party_threshold::Float64) # winning parties should be true, over-threshold winning parties
+    n_seats::Int, pop_per_seat::Int, party_threshold::Float64,
+    preferred_parties::Matrix{Int}) # winning parties should be true, over-threshold winning parties
 
     party_issue_weights = find_issue_weights(party_ideal_points, n_issues, 1, n_parties,
         issue_dimensions)
@@ -825,11 +824,13 @@ function evaluate_proportional_election(
         n_questions, n_seats, pop_per_seat
     )
 
+    true_party_support = convert(Dict{Int,Int}, counter(preferred_parties))
     gallagher_index = find_gallagher_index(winning_parties, raw_vote_counts, n_parties)
+    true_gallagher_index = find_gallagher_index(winning_parties, true_party_support, n_parties)
 
     return ProportionalEvaluation(
         indicators_qualified, utils_qualified, indicators_strict, utils_strict,
-        gallagher_index
+        gallagher_index, true_gallagher_index
     )
 
 end

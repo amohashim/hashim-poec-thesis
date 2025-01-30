@@ -122,7 +122,10 @@ const RAW_NAME_TO_NICE_NAME = OrderedDict{String,Symbol}(
     "spatialcharacteristics.spatialautocorrelationmeasurement_average_entropies_3" => :spat_avg_entropy3,
     "majoritarianevaluationmetrics.majoritarianevaluation_maj_gallagher_index" => :major_gallagher_index,
     "majoritarianevaluationmetrics.pluratarianevaluation_n_winning_parties" => :plur_n_winning_parties,
-    "proportionalevaluationmetrics.proportionalevaluation_qualified_measures_n_parties" => :prop_qual_n_parties
+    "proportionalevaluationmetrics.proportionalevaluation_qualified_measures_n_parties" => :prop_qual_n_parties,
+    "proportionalevaluationmetrics.proportionalevaluation_prop_true_gallagher_index" => :prop_true_gallagher_index,
+    "majoritarianevaluationmetrics.majoritarianevaluation_maj_true_gallagher_index" => :maj_true_gallagher_index,
+    "majoritarianevaluationmetrics.pluratarianevaluation_plur_true_gallagher_index" => :plur_true_gallagher_index
 )
 
 
@@ -267,25 +270,23 @@ const FACTOR_K_LOOKUP_TABLE = Dict{String,Int}(
 
 # turnout
 const FACTOR_L_LOOKUP_TABLE = Dict{String,Float64}(
-    "L0" => 404.0, "L_1" => 0.75, "L_2" => 0.5, "L_3" => 0.25
+    "L0" => 404.0, "L_1" => 0.99, "L_2" => 0.75, "L_3" => 0.5
 )
 
 # strategic voting
 const FACTOR_M_LOOKUP_TABLE = Dict{String,Float64}(
-    "L0" => 404.0, "M_1" => 0.1, "M_2" => 0.6
+    "L0" => 404.0, "M_1" => 0.01, "M_2" => 0.4
 )
 
 # demographic attitudes
-const FACTOR_N_LOOKUP_TABLE = Dict{String,SArray}(
-    "L0" => SVector{5,AbstractMatrix}([zeros(2, 2) for _ in 1:5]), # just a random choice
-    "N1_1" => SMatrix{1,5,Int}([0; 0; 0; 0; 0]),
-    "N1_2" => SMatrix{1,5,Int}([3; 3; 3; 3; 3]),
-    "N2_1" => SMatrix{3,5,Int}([0 0 0; 0 0 0; 0 0 0; 0 0 0; 0 0 0]),
-    "N2_2" => SMatrix{3,5,Int}([0 0 0; 0 0 0; 0 0 0; 0 0 0; 0 0 0]),
-    "N3_1" => SMatrix{5,5,Int}(
-        [0 0 0 0 0; 0 0 0 0 0; 0 0 0 0 0; 0 0 0 0 0; 0 0 0 0 0]),
-    "N3_2" => SMatrix{5,5,Int}(
-        [0 0 0 0 0; 0 0 0 0 0; 0 0 0 0 0; 0 0 0 0 0; 0 0 0 0 0])
+const FACTOR_N_LOOKUP_TABLE = Dict{String,Bool}(
+    "L0" => false,
+    "N1_1" => false,
+    "N1_2" => true,
+    "N2_1" => false,
+    "N2_2" => true,
+    "N3_1" => false,
+    "N3_2" => true
 )
 
 end

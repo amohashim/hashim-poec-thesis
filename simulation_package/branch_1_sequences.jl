@@ -1,4 +1,8 @@
-module Branch1Sequences
+module Branch1Sequences # Le_L2_L2_L1
+
+# Endogoenous Parties (Factor X) => NO (L2)
+# Dynamic Candidates (Factor Y) => NO (L2)
+# Imperfect Voters (Factor Z) => NO (L1)
 
 export run_proportional_election_sequence, run_majoritarian_sequence
 
@@ -23,7 +27,7 @@ using ..MajoritarianEvaluationMetrics
 
 function run_proportional_election_sequence(fixed_params::FixedParams{K},
     issue_structure::IssueStructure{J}, representative_params::RepresentativesParams,
-    branch_params::BranchParams{K}, question_structure::QuestionStructure{J},
+    branch_params::BranchParams{1}, question_structure::QuestionStructure{J},
     ideal_points::AbstractVector{Array{Float64,3}}, ideal_means::AbstractVector{Vector{Float64}},
     ideal_variances::AbstractVector{Vector{Float64}},
     voter_question_positions::AbstractVector{Array{Float64,3}},
@@ -93,7 +97,8 @@ function run_proportional_election_sequence(fixed_params::FixedParams{K},
             ProportionalEvaluationMetrics.evaluate_proportional_election(
                 party_ideal_points, voter_question_positions, party_question_positions,
                 voter_issue_weights, winning_parties, raw_vote_counts, n_parties,
-                n_issues, n_questions, issue_dimensions, n_seats, pop_per_seat
+                n_issues, n_questions, issue_dimensions, n_seats, pop_per_seat,
+                party_threshold
             )
     end
 

@@ -11,7 +11,7 @@ using ..SimulationParameters
 
 export z_scale_points, scale_utilities, convert_party_ideal_points_to_arrs
 export generate_question_positions, find_issue_weights, filter_parties_below_threshold
-export flatten_into_dict, find_geometric_median
+export flatten_into_dict, find_geometric_median, get_bitmatrix_from_matrix_quartiles
 
 """
     z_scale_points_for_tangian(points::Array{Float64,3})
@@ -411,6 +411,35 @@ function find_geometric_median(points::AbstractArray; tol=1e-6, max_iter=1000)
     end
 
     error("Failed to converge within $max_iter iterations")
+end
+
+
+"""
+    get_bitmatrix_from_matrix_quartiles(E, p)
+
+Returns a BitMatrix `S` of the same size as `E`, where:
+`S[i,j] = true` if `E[i,j] > threshold`
+and
+`S[i,j] = false` otherwise.
+
+The `threshold` is the `p`-th percentile of all values in `E`.
+For example, `p = 0.75` yields the 75th percentile.
+"""
+function get_bitmatrix_from_matrix_quartiles(E::AbstractMatrix{Float64}, p::Float64,
+    above_threshold::Bool)
+    # Flatten E into a single vector
+    vals = vec(E)
+
+    # Compute the p-th percentile
+    threshold = quantile(vals, p)
+
+    # Compare each element of E to threshold, producing a BitMatrix
+
+    if above_threshold
+        return BitArray(E .> threshold)
+    else
+        return BitArray(E .< threshold)
+    end
 end
 
 end

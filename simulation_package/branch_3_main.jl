@@ -1,9 +1,9 @@
 cd("/Users/alihashim/Desktop/Online_Academic_Submissions/poec_thesis/simulation_package")
-include("SimulationPackage.jl")
+include("SimulationPackage.jl") # Li_L1_L2_L2
 
 # Endogeneous Parties (Factor X) => YES (L1)
 # Dynamic Candidates (Factor Y) => NO (L2)
-# Imperfect Candidates (Factor Z) => NO (L2)
+# Imperfect Voters (Factor Z) => YES (L2)
 
 using Base.Threads
 using Random
@@ -19,7 +19,7 @@ using ..ExperimentDesignInterfaceTools: read_in_subdesign, initialize_output_dat
 using ..ExperimentDesignInterfaceTools: intitialize_simulation_run
 using ..ExperimentParameters
 using ..BranchAgnosticSequences
-using ..Branch2Sequences
+using ..Branch3Sequences
 using ..TangianIndices
 
 function define_parameters()
@@ -78,8 +78,8 @@ function io_task(io_channel::Channel{DataFrame}, output_path::String, io_chunk_s
     end
 end
 
-const SUBDESIGN_FILE_NAME::String = "/Users/alihashim/Desktop/Online_Academic_Submissions/poec_thesis/design_matrix/issue_L1_party_L1_cand_L2_voter_L1.csv"
-const OUTPUT_PATH::String = "L1_L1_L2_L1_2001_to_2511_5_replications.csv"
+const SUBDESIGN_FILE_NAME::String = "/Users/alihashim/Desktop/Online_Academic_Submissions/poec_thesis/design_matrix/issue_L3_party_L1_cand_L2_voter_L2.csv"
+const OUTPUT_PATH::String = "L_L1_L2_L1_2001_to_2511_5_replications.csv"
 const RUN_RANGE::UnitRange = 2001:2511
 const IO_CHUNK_SIZE::Int = 1
 const N_THREADS::Int = 4
@@ -112,8 +112,7 @@ function main()
                     dem_char_params, spatial_params, issue_structure, salience_structure,
                     question_structure, representative_params, branch_params, params_row =
                         intitialize_simulation_run(
-                            simulation_run, design_matrix
-                        )
+                            simulation_run, design_matrix)
                 end
 
                 statewide_demographic_dists, district_dists, coords = run_spatial_dist_sequence(
@@ -136,7 +135,7 @@ function main()
                     voter_ideal_points, voter_question_positions, voter_issue_weights =
                         run_proportional_election_sequence(
                             fixed_params, issue_structure, representative_params, question_structure,
-                            voter_ideal_points
+                            branch_params, voter_ideal_points
                         )
                 end
 
@@ -145,7 +144,7 @@ function main()
                         run_majoritarian_sequence(
                             fixed_params, issue_structure, branch_params, question_structure,
                             representative_params, voter_ideal_points, voter_question_positions,
-                            voter_issue_weights, preferred_parties
+                            voter_issue_weights, preferred_parties, 0.5
                         )
                 end
                 party_question_positions, winning_parties, n_parties = tangian_inputs
@@ -167,18 +166,4 @@ function main()
                 @error "Error in simulation_run $simulation_run: $e"
                 @error "Simulation run failed on iteration $simulation_run"
                 @error "Stacktrace: $(stacktrace(e))"
-                continue
-
-            end
-        end
-
-    end
-
-
-    close(io_channel)
-end
-
-
-if abspath(PROGRAM_FILE) == @__FILE__
-    main()
-end
+ 
