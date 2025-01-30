@@ -166,4 +166,18 @@ function main()
                 @error "Error in simulation_run $simulation_run: $e"
                 @error "Simulation run failed on iteration $simulation_run"
                 @error "Stacktrace: $(stacktrace(e))"
- 
+                continue
+
+            end
+        end
+
+    end
+
+
+    close(io_channel)
+end
+
+
+if abspath(PROGRAM_FILE) == @__FILE__
+    main()
+end
