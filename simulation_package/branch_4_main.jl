@@ -79,8 +79,8 @@ function io_task(io_channel::Channel{DataFrame}, output_path::String, io_chunk_s
 end
 
 const SUBDESIGN_FILE_NAME::String = "/Users/alihashim/Desktop/Online_Academic_Submissions/poec_thesis/design_matrix/issue_L1_party_L2_cand_L2_voter_L2.csv"
-const OUTPUT_PATH::String = "L1_L2_L2_L2_25001_to_35000_replications.csv"
-const RUN_RANGE::UnitRange = 25001:35000
+const OUTPUT_PATH::String = "L1_L2_L2_L2_40001_to_50000.csv"
+const RUN_RANGE::UnitRange = 40_001:50_000
 const IO_CHUNK_SIZE::Int = 100
 const N_THREADS::Int = 4
 
