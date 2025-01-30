@@ -367,3 +367,9 @@ function run_majoritarian_sequence(fixed_params::FixedParams{K},
         voter_utilities_for_candidates, preferred_parties, n_seats, pop_per_seat, n_issues,
         n_questions, n_candidates; plurality=true)
 
+    tangian_inputs = winning_candidates
+    return maj_evaluation, plurality_evaluation, tangian_inputs
+
+end
+
+end
