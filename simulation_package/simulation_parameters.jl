@@ -85,7 +85,7 @@ struct BranchParams{K}
 
     turnout_level::Float64
     strategic_level::Float64
-    demographic_attitudes::Union{SVector{K,AbstractMatrix},Nothing}
+    directional_utility::Bool
 
 end
 

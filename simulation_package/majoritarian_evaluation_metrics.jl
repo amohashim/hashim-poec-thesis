@@ -125,6 +125,7 @@ struct PluratarianEvaluation
     vse::Float64
     n_winning_parties::Int
     n_parties_effective::Float64
+    plur_true_gallagher_index::Float64
 
 end
 
@@ -138,7 +139,7 @@ struct MajoritarianEvaluation
     vse::Float64
     n_winning_parties::Int
     n_parties_effective::Float64
-
+    maj_true_gallagher_index::Float64
 end
 
 function find_district_info(seat::Int, candidates::Vector{Vector{Int}},
@@ -518,6 +519,26 @@ function find_gallagher_index(legislature_party_proportions::Dict{Int,Float64},
 
 end
 
+function find_gallagher_index(winning_parties::Dict{Int,Float64},
+    raw_vote_counts::Dict{Int,Int}, n_parties::Int)
+
+    raw_vote_shares = HelpfulFunctions.filter_parties_below_threshold(
+        raw_vote_counts, 0.0, n_parties, true
+    )
+    diffs = Vector{Float64}(undef, n_parties) # NOT necessarily ordered
+
+    for (i, party) in enumerate(keys(raw_vote_shares))
+        if !haskey(winning_parties, party)
+            diffs[i] = raw_vote_shares[party]
+        else
+            diffs[i] = raw_vote_shares[party] - winning_parties[party]
+        end
+    end
+    gallagher_index = sqrt(0.5 * sum(diffs .^ 2))
+    return gallagher_index
+
+end
+
 function compute_prop_like_indices(legislature_party_proportions::Dict{Int,Float64},
     voter_party_proportions::Dict{Int,Float64})
 
@@ -591,7 +612,14 @@ function evaluate_majoritarian_election(voter_question_positions::AbstractVector
     )
 
     gallagher_index = find_gallagher_index(legislature_party_proportions, voter_party_proportions)
-    n_winning_parties = count(values(legislature_party_proportions) .> 1)
+
+    true_party_support = Dict{Int,Float64}(
+        party => raw_votes / (pop_per_seat * n_seats) for (party, raw_votes) in
+        counter(preferred_parties)
+    )
+
+    true_gallagher_index = find_gallagher_index(legislature_party_proportions, true_party_support)
+    n_winning_parties = count(values(legislature_party_proportions) .> 0.0)
     n_parties_effective = 1.0 / sum(values(legislature_party_proportions) .^ 2)
 
     if maj_util_metrics.utility_from_winner.avg / maj_util_metrics.utility_from_maximizer.avg != 0.0
@@ -603,12 +631,12 @@ function evaluate_majoritarian_election(voter_question_positions::AbstractVector
     if plurality
         return PluratarianEvaluation(
             maj_util_metrics, maj_eff_metrics, strict_maj_body_metrics, qualified_maj_body_metrics,
-            gallagher_index, vse, n_winning_parties, n_parties_effective
+            gallagher_index, vse, n_winning_parties, n_parties_effective, true_gallagher_index
         )
     else
         return MajoritarianEvaluation(
             maj_util_metrics, maj_eff_metrics, strict_maj_body_metrics, qualified_maj_body_metrics,
-            gallagher_index, vse, n_winning_parties, n_parties_effective
+            gallagher_index, vse, n_winning_parties, n_parties_effective, true_gallagher_index
         )
     end
 

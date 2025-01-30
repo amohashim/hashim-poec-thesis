@@ -7,7 +7,12 @@ using StaticArrays
 using LinearAlgebra: norm
 using DataStructures
 
+export poll_district, expected_policy_utility
+
 """
+
+DISTANCE UTILITY
+
     find_closest_party_for_one_voter(
         voter_ideals::Vector{Vector{Float64}},
         parties::Vector{Matrix{Float64}}
@@ -27,7 +32,7 @@ function find_closest_representative_for_one_voter(
     voter_issue_weights::Vector{Float64},
     n_representatives::Int,
     n_issues::Int,
-    issue_dimensions::AbstractVector{Int},
+    issue_dimensions::AbstractVector{Int}
 )
     # We'll accumulate total distances in a local vector
     fill!(dist_sums, 0.0)   # set all party sums to zero
@@ -52,6 +57,40 @@ function find_closest_representative_for_one_voter(
     utilities = -1 .* (dist_sums .^ 2)
     # now find the party with the min distance sum
     _, idx = findmax(utilities)
+    return idx, utilities
+end
+
+"""
+
+DIRECTIONAL UTILITY
+
+    find_closest_party_for_one_voter(
+        voter_ideals::Vector{Vector{Float64}},
+        parties::Vector{Matrix{Float64}}
+    ) -> Int
+Given:
+- voter_ideals[i]: the d_i-dimensional ideal point of this voter on issue i
+- parties[i]: a P x d_i matrix of party positions for issue i
+Compute w_i = norm(voter_ideals[i]) / sqrt(d_i) and then the Euclidean distance
+d(voter, party) for each issue i, sum across i with the weight w_i,
+and return the party index (1..P) that yields the minimum sum.
+This function processes a single voter’s assignment.
+"""
+function find_closest_representative_for_one_voter(
+    voter_super_ideal_points::Vector{Vector{Float64}},
+    representative_super_ideal_points::Vector{Matrix{Float64}},
+    β::Float64
+)
+    v_i = voter_super_ideal_points[1]  # d_i-vector (the voter)
+    representative_mat = representative_super_ideal_points[1]  # P x d_i
+
+    @views voter_mag_sq = sum(v_i .^ 2)  # Precompute voter magnitude squared
+    @views candidate_mags_sq = sum(representative_mat .^ 2, dims=2)[:]  # Vectorized computation
+
+    # Compute utilities
+    @views utilities = 2.0 .* (representative_mat * v_i) .- β .* (voter_mag_sq .+ candidate_mags_sq)
+
+    idx = argmax(utilities)
     return idx, utilities
 end
 
@@ -80,7 +119,9 @@ function assign_voters_to_parties!(
     n_issues::Int,
     n_seats::Int,
     pop_per_seat::Int,
-    issue_dimensions::AbstractVector{Int}
+    issue_dimensions::AbstractVector{Int};
+    use_directional_utility::Bool=false,
+    β::Float64=1.0
 )
 
     # We'll produce an N x A result
@@ -115,11 +156,20 @@ function assign_voters_to_parties!(
                 voter_ideals[issue] = @views voter_ideal_points[issue][seat, voter, 1:d_i]
             end
 
-            issue_weights = seat_issue_weights[:, voter]
             # Step 2: find the closest party
-            party_idx, utilities = find_closest_representative_for_one_voter(dist_sums,
-                voter_ideals, party_ideal_points, issue_weights, n_parties, n_issues,
-                issue_dimensions)
+
+            if use_directional_utility
+                party_idx, utilities = find_closest_representative_for_one_voter(
+                    voter_ideals, party_ideal_points, β)
+            else
+
+                issue_weights = seat_issue_weights[:, voter]
+                party_idx, utilities = find_closest_representative_for_one_voter(dist_sums,
+                    voter_ideals, party_ideal_points, issue_weights, n_parties, n_issues,
+                    issue_dimensions)
+
+            end
+
             # Step 3: store
             result[seat, voter] = party_idx
             voter_utilities[seat, voter, :] = utilities
@@ -143,7 +193,9 @@ function assign_voters_to_candidates!(
     n_issues::Int,
     seat::Int,
     pop_per_seat::Int,
-    issue_dimensions::AbstractVector{Int}
+    issue_dimensions::AbstractVector{Int};
+    use_directional_utility::Bool=false,
+    β::Float64=1.0
 )
     # We'll produce an N x A result
     result = Matrix{Int}(undef, 1, pop_per_seat)
@@ -171,11 +223,17 @@ function assign_voters_to_candidates!(
         end
         # Step 2: find the closest party
 
-        issue_weights = voter_issue_weights[:, seat, voter]
-        party_idx, utilities = find_closest_representative_for_one_voter(dist_sums,
-            voter_ideals, candidate_ideal_points, issue_weights, n_candidates, n_issues,
-            issue_dimensions
-        )
+        if use_directional_utility
+            party_idx, utilities = find_closest_representative_for_one_voter(
+                voter_ideals, candidate_ideal_points, β
+            )
+        else
+            issue_weights = voter_issue_weights[:, seat, voter]
+            party_idx, utilities = find_closest_representative_for_one_voter(dist_sums,
+                voter_ideals, candidate_ideal_points, issue_weights, n_candidates, n_issues,
+                issue_dimensions
+            )
+        end
         # Step 3: store
         result[1, voter] = party_idx
         voter_utilities[voter, :] = utilities
@@ -196,7 +254,9 @@ function assign_voters_to_candidates!(
     n_issues::Int,
     seat::Int,
     pop_per_seat::Int,
-    issue_dimensions::AbstractVector{Int}
+    issue_dimensions::AbstractVector{Int};
+    use_directional_utility::Bool=false,
+    β::Float64=1.0
 )
     # We'll produce an N x A result
     result = Matrix{Int}(undef, 1, pop_per_seat)
@@ -224,10 +284,18 @@ function assign_voters_to_candidates!(
             voter_ideals[issue] = @views voter_ideal_points[issue][seat, voter, 1:d_i]
         end
         # Step 2: find the closest party
-        issue_weights = voter_issue_weights[:, seat, voter]
-        party_idx, utilities = find_closest_representative_for_one_voter(dist_sums,
-            voter_ideal_points, candidate_ideal_points, issue_weights, n_candidates,
-            n_issues, issue_dimensions)
+
+        if use_directional_utility
+            party_idx, utilities = find_closest_representative_for_one_voter(
+                voter_ideal_points, candidate_ideal_points, β
+            )
+        else
+            issue_weights = voter_issue_weights[:, seat, voter]
+            party_idx, utilities = find_closest_representative_for_one_voter(dist_sums,
+                voter_ideal_points, candidate_ideal_points, issue_weights, n_candidates,
+                n_issues, issue_dimensions)
+        end
+
         # Step 3: store
         result[1, voter] = party_idx
         voter_utilities[voter, :] = utilities
@@ -285,9 +353,196 @@ function find_candidate_ideal_points(ideal_points::AbstractVector{Array{Float64,
 
 end
 
+"""
+N x A x C array where each entry in rankings[n,:,:] is what rank voter a gives candidate C
+
+So, rows are voters and columns are candidates; this is NOT rows are voters and columsn are rankings
+
+"""
+function compute_voter_rankings(candidate_utilities::Array{Float64,3}, n_seats::Int,
+    pop_per_seat::Int, n_candidates::Int; use_specific_seat::Bool=false, seat_number::Int=0)
+
+    # Prepare an output array for the rankings.
+    rankings = Array{Int}(undef, n_seats, pop_per_seat, n_candidates)
+
+    # Preallocate arrays used inside loops
+    rank = Vector{Int}(undef, n_candidates)
+    sorted_indices = Vector{Int}(undef, n_candidates)
+
+    for seat in 1:n_seats
+
+        if use_specific_seat
+
+            seat = seat_number
+
+        end
+
+        for voter in 1:pop_per_seat
+            # Extract the utilities for the voter
+            utilities = @view candidate_utilities[seat, voter, :]
+
+            # Sort indices by descending utilities
+            sortperm!(sorted_indices, utilities, rev=true)
+
+            # Compute ranks directly
+            for candidate in 1:n_candidates
+                rank[sorted_indices[candidate]] = candidate
+            end
+
+            # Assign computed ranks to the output
+            @views rankings[seat, voter, :] = rank
+        end
+    end
+
+    return rankings
+end
+
+function compute_voter_rankings(candidate_utilities::AbstractMatrix,
+    pop_per_seat::Int, n_candidates::Int)
+
+    # Prepare an output array for the rankings.
+    rankings = Array{Int}(undef, pop_per_seat, n_candidates)
+
+    # Preallocate arrays used inside loops
+    rank = Vector{Int}(undef, n_candidates)
+    sorted_indices = Vector{Int}(undef, n_candidates)
+
+    for voter in 1:pop_per_seat
+        # Extract the utilities for the voter
+        utilities = @view candidate_utilities[voter, :]
+
+        # Sort indices by descending utilities
+        sortperm!(sorted_indices, utilities, rev=true)
+
+        # Compute ranks directly
+        for candidate in 1:n_candidates
+            rank[sorted_indices[candidate]] = candidate
+        end
+
+        # Assign computed ranks to the output
+        @views rankings[voter, :] = rank
+    end
+
+    return rankings
+end
+
+function sample_voters(A::Int, sample_size::Int, rng::AbstractRNG)
+    # If A < sample_size, we just take all
+    n_samp = min(A, sample_size)
+    # create a permutation of 1..A
+    perm = randperm(rng, A)
+    return @view perm[1:n_samp]
+end
+
+
+"""
+    poll_district(
+        d::Int,
+        sample_size::Int,
+        voter_rankings::Vector{Matrix{Int}},
+        is_active::Vector{Bool};
+        rng=MersenneTwister(42)
+    ) -> Vector{Int}
+
+Randomly samples `sample_size` voters (or all if sample_size > A_d),
+from district d, and returns a length-(numCands_d) integer vector of counts.
+"""
+function poll_district!(
+    counts::Vector{Int},
+    rankings_n::Matrix{Int},
+    is_active::Union{Vector{Bool},BitVector},
+    rng::AbstractRNG;
+    sample_size::Int=400
+)
+    # Wipe counts
+    fill!(counts, 0)
+    A, numCands = size(rankings_n)
+    n_samp = min(A, sample_size)
+
+    # We'll produce a random subset of voters
+    voters = randperm(rng, A)
+    # take the first n_samp as the chosen voters
+    chosen = @view voters[1:n_samp]
+
+    @inbounds for v in chosen
+        # rankings_n[v, :] is the best->worst order of local cands
+        @inbounds for r in 1:numCands
+            c_local = rankings_n[v, r]
+            if is_active[c_local]
+                counts[c_local] += 1
+                break
+            end
+        end
+    end
+end
+
+function make_preferred_candidates_strategic(
+    R_n::Matrix{Int},
+    top_two::AbstractVector{Int},
+    is_strategic::BitVector,
+    preferred_candidates::Vector{Int},
+)
+    # Precompute each strategic voter's best choice among the top-two
+    A, C = size(R_n)  # A: number of voters, C: number of candidates
+    c1, c2 = top_two
+
+    # For each voter a, figure out which top-2 candidate they prefer
+    # We'll store that in an Int vector of length A
+    best_among_top_two = Vector{Int}(undef, A)
+    for a in 1:A
+        if is_strategic[a]
+            if R_n[a, c1] < R_n[a, c2]
+                best_among_top_two[a] = c1
+            else
+                best_among_top_two[a] = c2
+            end
+        else
+            # For non-strategic, store a sentinel (e.g. -1) or 0
+            best_among_top_two[a] = -1
+        end
+    end
+
+    # Now make a copy of the original matrix so we don't mutate it
+    preferred_candidates_strategic = copy(preferred_candidates)
+
+    # For each strategic voter, replace the entire column in one shot
+    for (a, strategic) in enumerate(is_strategic)
+        if strategic
+            preferred_candidates_strategic[a] = best_among_top_two[a]
+        end
+    end
+
+    return preferred_candidates_strategic
+end
+
+"""
+counting votes for a given district, with given turnout
+
+"""
+function count_votes(
+    strategic_preferred_candidates_n::Vector{Int},
+    turnout_voters_n::BitVector,
+    n_candidates::Int
+)
+    # C is the total number of candidates
+    counts = zeros(Int, n_candidates)  # counts[i] will be how many votes candidate i gets
+
+    for i in 1:length(strategic_preferred_candidates_n)
+        if turnout_voters_n[i]
+            candidate = strategic_preferred_candidates_n[i]
+            counts[candidate] += 1
+        end
+    end
+    return counts
+end
+
 function run_single_round_election(ideal_points::AbstractVector{Array{Float64,3}},
     candidates::Vector{Vector{Int}}, voter_issue_weights::Array{Float64,3}, n_seats::Int,
-    n_candidates::Int, n_issues::Int, pop_per_seat::Int, issue_dimensions::AbstractVector{Int})
+    n_candidates::Int, n_issues::Int, pop_per_seat::Int, issue_dimensions::AbstractVector{Int};
+    use_directional_utility::Bool=false, β::Float64=1.0,
+    strategic_voters::Union{Matrix{Bool},BitMatrix,Nothing}=nothing,
+    turnout_voters::Union{Matrix{Bool},BitMatrix,Nothing}=nothing,
+    rng::Union{AbstractRNG,Nothing}=nothing)
 
     election_proportions = Vector{Dict{Int,Float64}}(undef, n_seats)
     voter_utilites = Array{Float64,3}(undef, n_seats, pop_per_seat, n_candidates)
@@ -299,13 +554,36 @@ function run_single_round_election(ideal_points::AbstractVector{Array{Float64,3}
         )
 
         dist_sums = Vector{Float64}(undef, n_candidates)
+
         results, utilities = assign_voters_to_candidates!(dist_sums,
             ideal_points, candidate_points, voter_issue_weights, n_candidates, n_issues, seat,
-            pop_per_seat, issue_dimensions
+            pop_per_seat, issue_dimensions; use_directional_utility=use_directional_utility, β=β
         )
 
-        candidate_choices[seat, :] = results
-        proportions = Dict(idx => ct / pop_per_seat for (idx, ct) in counter(results))
+        if isnothing(strategic_voters) || n_candidates <= 3
+            candidate_choices[seat, :] = results
+        else
+            is_strategic = strategic_voters[seat, :]
+            rankings = compute_voter_rankings(utilities, pop_per_seat, n_candidates)
+            poll_counts = zeros(Int, n_candidates)
+            poll_district!(poll_counts, rankings, [true for _ in 1:n_candidates], rng)
+            top_3_cands = partialsortperm(poll_counts, 1:3, rev=true)
+            results = make_preferred_candidates_strategic(
+                rankings, top_3_cands, is_strategic, vec(results)
+            )
+            candidate_choices[seat, :] = results
+        end
+
+        if isnothing(turnout_voters)
+            proportions = Dict(idx => ct / pop_per_seat for (idx, ct) in counter(results))
+        else
+            turns_out = turnout_voters[seat, :]
+            raw_vote_count = count_votes(vec(results), turns_out, n_candidates)
+            proportions = Dict{Int,Float64}(
+                candidate => vote_count / count(turnout_voters[seat, :])
+                for (candidate, vote_count) in enumerate(raw_vote_count)
+            )
+        end
 
         election_proportions[seat] = map_global_indx_to_props(candidate_map, proportions)
 
@@ -315,6 +593,110 @@ function run_single_round_election(ideal_points::AbstractVector{Array{Float64,3}
 
     return election_proportions, voter_utilites, candidate_choices
 
+end
+
+"""
+1) Collapse the 3D array R to a 2D matrix
+   R is size (N, A, P).
+   The result is size (N*A, P).
+
+    collapse_rankings(R) -> Matrix{Int}
+
+Given a 3D array `R` of size `(N, A, P)`, returns a new 2D array `(N*A, P)` 
+where rows 1:A correspond to R[1, :, :], rows (A+1):2A correspond to R[2, :, :], etc.
+"""
+function collapse_rankings(R::Array{Int,3})::Matrix{Int}
+    @assert ndims(R) == 3 "R must be a 3D array"
+    N, A, P = size(R)
+    out = Matrix{Int}(undef, N * A, P)
+
+    idx = 1
+    @inbounds for n in 1:N
+        for a in 1:A
+            for p in 1:P
+                out[idx, p] = R[n, a, p]
+            end
+            idx += 1
+        end
+    end
+    return out
+end
+# ----------------------------------------------
+# 2) For each voter, determine which party they
+#    will vote for, given:
+#      - R[n,a,p] : rank of party p for voter (n,a)
+#      - strategic_voters[n,a] : if true => pick the top-ranked
+#        among parties_above_threshold, otherwise pick top choice
+#      - preferred_parties[n,a] : the voter’s normal top choice
+#      - parties_above_threshold[p] : a BitVector marking viable parties
+#
+#    Returns an N x A matrix of chosen parties.
+# ----------------------------------------------
+function compute_strategic_preferred_parties(
+    party_rankings::AbstractArray{Int,3},
+    strategic_voters::BitMatrix,
+    preferred_parties::Matrix{Int},
+    parties_above_threshold::BitVector
+)::Matrix{Int}
+    @assert size(party_rankings, 1) == size(strategic_voters, 1) == size(preferred_parties, 1)
+    @assert size(party_rankings, 2) == size(strategic_voters, 2) == size(preferred_parties, 2)
+    N, A, P = size(party_rankings)
+
+    # Allocate an N x A matrix to hold each voter's final chosen party
+    strategic_preferred_parties = similar(preferred_parties)
+
+    @inbounds for n in 1:N
+        for a in 1:A
+            if strategic_voters[n, a]
+                # This voter is strategic: pick the "best" among parties that are above threshold
+                best_party = 0
+                best_rank = typemax(Int)  # large placeholder
+                @inbounds for p in 1:P
+                    if parties_above_threshold[p]
+                        rnk = party_rankings[n, a, p]
+                        if rnk < best_rank
+                            best_rank = rnk
+                            best_party = p
+                        end
+                    end
+                end
+                strategic_preferred_parties[n, a] = best_party
+            else
+                # Non-strategic: keep their normal #1 choice
+                strategic_preferred_parties[n, a] = preferred_parties[n, a]
+            end
+        end
+    end
+
+    return strategic_preferred_parties
+end
+
+# ----------------------------------------------
+# 3) Count how many voters (among those who turn out)
+#    prefer each party. 
+#    - chosen_parties[n,a] : the final chosen party for each voter
+#    - turnout_voters[n,a] : whether the voter shows up
+#    - P : total number of parties
+# ----------------------------------------------
+function count_party_support(
+    chosen_parties::Matrix{Int},
+    turnout_voters::BitMatrix,
+    n_parties::Int
+)::Vector{Int}
+    @assert size(chosen_parties) == size(turnout_voters)
+    N, A = size(chosen_parties)
+    party_support = zeros(Int, n_parties)
+
+    @inbounds for n in 1:N
+        for a in 1:A
+            if turnout_voters[n, a]
+                p_chosen = chosen_parties[n, a]
+                party_support[p_chosen] += 1
+            end
+        end
+    end
+
+    return party_support
 end
 
 function tally_top_2(election_proportions::Vector{Dict{Int,Float64}}, n_seats::Int
@@ -384,147 +766,301 @@ end
     return top_1_candidates
 end
 
+function expected_policy_utility(
+    c::Int,
+    ptt::Vector{Float64},
+    U1_n::Vector{Float64},
+    U2_n::Matrix{Float64}
+)
+    val = ptt[c] * U1_n[c]
+    @inbounds for j in eachindex(ptt)
+        if j != c
+            val += ptt[j] * U2_n[c, j]
+        end
+    end
+    return val
+end
 
 
-"""
-    build_voter_rankings_dot!(
-        rankings_n::Matrix{Int},
-        ideal_points::Array{Float64,3},  # size: (N, A, d_i)
-        candidate_list::Vector{Int},
-        n::Int
+function run_strategic_exit_and_top2_for_district(
+    n::Int,
+    rankings_n::Matrix{Int},
+    U1_n::Vector{Float64},
+    U2_n::Matrix{Float64},
+    rng::AbstractRNG;
+    sample_size::Int=400,
+    Nsamples_dirichlet::Int=100,
+    max_rounds::Int=3
+)
+    numCands = size(U2_n, 1)
+    is_active = trues(numCands)
+
+    run_strategic_exit_for_district!(
+        n,
+        rankings_n,
+        U1_n,
+        U2_n,
+        is_active,
+        rng;
+        sample_size=sample_size,
+        Nsamples_dirichlet=Nsamples_dirichlet,
+        max_rounds=max_rounds
     )
 
-Fills `rankings_n` (size A x #cands) with local-candidate indices 
-sorted by the dot product between voter v's ideal point 
-and each candidate's ideal point. 
- - n = district index
- - candidate_list = candidate_list_by_district[n], e.g. [5,10,12]
- - local index i_local => candidate_list[i_local] = a_global
+    # Then pick final top2
+    top2_locals = final_top_two(rankings_n, is_active)
+    return top2_locals, is_active
+end
+
+
 """
-function build_voter_rankings_dot!(
-    rankings_n::Matrix{Int},
-    ideal_points::Array{Float64,3},
-    candidate_list::Vector{Int},
-    n::Int
+    run_entire_sim_for_issue(
+        pop_issues_ideal_i::Array{Float64,3},
+        pop_issues_positions_i::Array{Float64,3},
+        candidate_list_by_district::Vector{Vector{Int}},
+        dims_issue::Int,
+        Q::Int,
+        rng::AbstractRNG
+    ) -> Vector{Vector{Int}}
+
+For each district n in 1..N:
+  1) Build (U1[n], U2[n]) for that district's candidates.
+  2) Build voter_rankings[n].
+  3) run_strategic_exit_for_district(n, ...).
+Return a vector of length N, 
+where each entry is the top2 local indices for that district.
+"""
+function run_entire_sim_for_issue(
+    pop_issues_ideal_i::Array{Float64,3},
+    pop_issues_positions_i::Array{Float64,3},
+    candidate_list_by_district::Vector{Vector{Int}},
+    dims_issue::Int,
+    Q::Int,
+    rng::AbstractRNG=MersenneTwister(42);
+    sample_size::Int=400,
+    Nsamples_dirichlet::Int=100
 )
-    A = size(ideal_points, 2)
-    numCands = length(candidate_list)
-    d_i = size(ideal_points, 3)
+    N = size(pop_issues_ideal_i, 1)  # number of districts
+    U1 = Vector{Vector{Float64}}(undef, N)
+    U2 = Vector{Matrix{Float64}}(undef, N)
+    district_rankings = Vector{Matrix{Int}}(undef, N)
 
-    # We do: for each voter v in 1..A:
-    #   For each candidate c_local => a_global = candidate_list[c_local]:
-    #       score = dot( ideal_points[n, v, :], ideal_points[n, a_global, :] )
-    #   Sort c_local in descending order of score.
-    # Place them in rankings_n[v, :].
-    temp_scores = Vector{Tuple{Float64,Int}}(undef, numCands)
-    @inbounds for v in 1:A
-        # compute dot product for each candidate
-        for (i_local, a_cand) in enumerate(candidate_list)
-            sc = 0.0
-            @inbounds @simd for dd in 1:d_i # we can accept small errors here
-                sc += ideal_points[n, v, dd] * ideal_points[n, a_cand, dd]
-            end
-            temp_scores[i_local] = (sc, i_local)
-        end
-        # sort by sc descending
-        sort!(temp_scores, by=x -> x[1], rev=true)
-        # fill rankings
-        for (rank_idx, (_, c_local)) in pairs(temp_scores)
-            rankings_n[v, rank_idx] = c_local
-        end
-    end
-end
-
-"""
-N x A x C array where each entry in rankings[n,:,:] is what rank voter a gives candidate C
-
-So, rows are voters and columns are candidates; this is NOT rows are voters and columsn are rankings
-
-"""
-function compute_voter_rankings(candidate_utilities::Array{Float64,3}, n_seats::Int,
-    pop_per_seat::Int, n_candidates::Int)
-
-    # Prepare an output array for the rankings.
-    rankings = Array{Int}(undef, n_seats, pop_per_seat, n_candidates)
-
-    # Preallocate arrays used inside loops
-    rank = Vector{Int}(undef, n_candidates)
-    sorted_indices = Vector{Int}(undef, n_candidates)
-
-    for seat in 1:n_seats
-
-        for voter in 1:pop_per_seat
-            # Extract the utilities for the voter
-            utilities = @view candidate_utilities[seat, voter, :]
-
-            # Sort indices by descending utilities
-            sortperm!(sorted_indices, utilities, rev=true)
-
-            # Compute ranks directly
-            for candidate in 1:n_candidates
-                rank[sorted_indices[candidate]] = candidate
-            end
-
-            # Assign computed ranks to the output
-            @views rankings[seat, voter, :] = rank
-        end
+    for n in 1:N
+        # Build the candidate utilities
+        U1[n], U2[n] = build_candidate_utilities_for_issue(
+            pop_issues_ideal_i,
+            pop_issues_positions_i,
+            candidate_list_by_district,
+            n,
+            dims_issue,
+            Q
+        )
+        # Build the voter rankings
+        district_rankings[n] = build_voter_rankings_for_district(
+            pop_issues_positions_i,
+            candidate_list_by_district,
+            n
+        )
     end
 
-    return rankings
-end
-
-
-function sample_voters(A::Int, sample_size::Int, rng::AbstractRNG)
-    # If A < sample_size, we just take all
-    n_samp = min(A, sample_size)
-    # create a permutation of 1..A
-    perm = randperm(rng, A)
-    return @view perm[1:n_samp]
-end
-
-"""
-    poll_district(
-        d::Int,
-        sample_size::Int,
-        voter_rankings::Vector{Matrix{Int}},
-        is_active::Vector{Bool};
-        rng=MersenneTwister(42)
-    ) -> Vector{Int}
-
-Randomly samples `sample_size` voters (or all if sample_size > A_d),
-from district d, and returns a length-(numCands_d) integer vector of counts.
-"""
-function poll_district!(
-    counts::Vector{Int},
-    rankings_n::Matrix{Int},
-    is_active::Vector{Bool},
-    rng::AbstractRNG;
-    sample_size::Int=400
-)
-    # Wipe counts
-    fill!(counts, 0)
-    A, numCands = size(rankings_n)
-    n_samp = min(A, sample_size)
-
-    # We'll produce a random subset of voters
-    voters = randperm(rng, A)
-    # take the first n_samp as the chosen voters
-    chosen = @view voters[1:n_samp]
-
-    @inbounds for v in chosen
-        # rankings_n[v, :] is the best->worst order of local cands
-        @inbounds for r in 1:numCands
-            c_local = rankings_n[v, r]
-            if is_active[c_local]
-                counts[c_local] += 1
-                break
-            end
-        end
+    # Now run strategic exit for each district
+    top2_local_indices = Vector{Vector{Int}}(undef, N)
+    for n in 1:N
+        top2_local_indices[n] = run_strategic_exit_for_district(
+            n,
+            district_rankings,
+            U1,
+            U2,
+            rng;
+            sample_size=sample_size,
+            Nsamples_dirichlet=Nsamples_dirichlet
+        )
     end
+
+    return top2_local_indices
 end
 
+
+
+end
+
+module StrategicExit
 
 using Distributions
+using LinearAlgebra
+using Random
+using StaticArrays
+using LinearAlgebra: norm
+using DataStructures
+
+using ..ElectionSimulation: poll_district, expected_policy_utility
+using ..HelpfulFunctions: scale_utilities
+using ..CandidatesSimulation: build_candidate_utilities_multi_issue
+
+"""
+    build_candidate_ideal_points_for_issue(
+       all_voters_ideal_points_k::Array{Float64,3},  # shape (N, A, d_k)
+       candidate_list_n::Vector{Int},               # e.g. [5,10,12]
+       n::Int
+    ) -> Matrix{Float64}
+
+Returns a (C_n x d_k) matrix, where row c_local 
+corresponds to agent = candidate_list_n[c_local], i.e. 
+all_voters_ideal_points_k[n, a_global, :].
+"""
+function build_candidate_ideal_points_for_issue(
+    all_voters_ideal_points_k::Array{Float64,3},
+    candidate_list_n::Vector{Int},
+    n::Int
+)
+    C_n = length(candidate_list_n)
+    d_k = size(all_voters_ideal_points_k, 3)
+    rep_mat = Matrix{Float64}(undef, C_n, d_k)
+    @inbounds for c_local in 1:C_n
+        a_global = candidate_list_n[c_local]
+        @views rep_mat[c_local, :] = all_voters_ideal_points_k[n, a_global, :]
+    end
+    return rep_mat
+end
+
+"""
+    compute_voter_utilities_for_one_district(
+       n::Int, 
+       v::Int,
+       candidate_list_n::Vector{Int},
+       all_voters_ideal_points::Vector{Array{Float64,3}},
+       voter_issue_weights::Array{Float64,3}
+    ) -> Vector{Float64}
+
+Given that:
+ - we have K = length(all_voters_ideal_points) issues
+ - each all_voters_ideal_points[k] is NxAxd_k
+ - voter_issue_weights is shape (K, N, A)
+ - candidate_list_n is length C_n
+Compute the utility for voter (n,v) for each candidate in candidate_list_n, 
+using "sum of w_k * Eucl. distances across issues => then negative squared."
+
+Returns a Vector{Float64} of length C_n with the final utilities.
+"""
+function compute_voter_utilities_for_one_district(
+    n::Int,
+    v::Int,
+    candidate_list_n::Vector{Int},
+    all_voters_ideal_points::AbstractVector{Array{Float64,3}},
+    voter_issue_weights::Array{Float64,3}
+)
+    C_n = length(candidate_list_n)
+    K = length(all_voters_ideal_points)
+
+    # We'll do "distance_sums[c_local]" then convert to utility
+    distance_sums = zeros(C_n)
+
+    # Loop issues
+    for k in 1:K
+        # weight
+        w_k = voter_issue_weights[k, n, v]
+        # voter ideal point in R^{d_k}
+        voter_vec = @view all_voters_ideal_points[k][n, v, :]
+
+        # for each candidate c_local
+        for c_local in 1:C_n
+            a_c = candidate_list_n[c_local]
+            candidate_vec = @view all_voters_ideal_points[k][n, a_c, :]
+
+            # Eucl distance in d_k dimension
+            ssd = 0.0
+            @inbounds for dd in eachindex(candidate_vec)
+                diff = voter_vec[dd] - candidate_vec[dd]
+                ssd += diff * diff
+            end
+            distance_sums[c_local] += w_k * sqrt(ssd)
+        end
+    end
+
+    # Convert distances => utilities
+    utilities = similar(distance_sums)
+    @inbounds for c_local in 1:C_n
+        utilities[c_local] = -distance_sums[c_local]^2
+    end
+
+    return scale_utilities(utilities)
+end
+
+"""
+    build_voter_rankings_for_district(
+       n::Int,
+       all_voters_ideal_points::Vector{Array{Float64,3}}, 
+       voter_issue_weights::Array{Float64,3}, 
+       candidate_list_by_district::Vector{Vector{Int}}
+    ) -> Matrix{Int}
+
+Construct an (A x C_n) ranking matrix for district n, 
+where row v is the preference order of local candidates in candidate_list_by_district[n].
+We assume A is the # of agents in district n (1..A) are all voters. 
+We do "Specification One" distance-based utility.
+
+We return a matrix `rankings_n` of size (A x C_n).
+"""
+function build_voter_rankings_for_district(
+    n::Int,
+    all_voters_ideal_points::AbstractVector{Array{Float64,3}},
+    voter_issue_weights::Array{Float64,3},
+    candidate_list_by_district::Vector{Vector{Int}}
+)
+    # gather the candidate list for district n
+    candidate_list_n = candidate_list_by_district[n]
+    C_n = length(candidate_list_n)
+
+    # We assume the shape of all_voters_ideal_points[1] is (N, A, d_1),
+    # so the second dimension is the # of agents A. We'll take that from the data
+    A = size(all_voters_ideal_points[1], 2)  # # of agents in district n
+
+    # We'll produce an (A x C_n) matrix of local candidate indices in descending utility order
+    rankings_n = Matrix{Int}(undef, A, C_n)
+
+    # We'll do a workspace for (utility, cand_local) pairs
+    utility_pairs = Vector{Tuple{Float64,Int}}(undef, C_n)
+
+    for v in 1:A
+        # compute utilities for voter (n,v)
+        utilities_v = compute_voter_utilities_for_one_district(
+            n, v, candidate_list_n, all_voters_ideal_points, voter_issue_weights
+        )
+
+        # we want to sort in descending order => candidate with highest utility first
+        for c_local in 1:C_n
+            utility_pairs[c_local] = (utilities_v[c_local], c_local)
+        end
+        sort!(utility_pairs, by=x -> x[1], rev=true)
+
+        # fill rankings_n[v, :]
+        for j in 1:C_n
+            # the j-th best candidate in local index space
+            c_local_best = utility_pairs[j][2]
+            rankings_n[v, j] = c_local_best
+        end
+    end
+
+    return rankings_n
+end
+
+function build_voter_rankings_for_all_districts(
+    N::Int,
+    all_voters_ideal_points::AbstractVector{Array{Float64,3}},
+    voter_issue_weights::Array{Float64,3},
+    candidate_list_by_district::Vector{Vector{Int}}
+)
+    district_rankings = Vector{Matrix{Int}}(undef, N)
+    for n in 1:N
+        district_rankings[n] = build_voter_rankings_for_district(
+            n,
+            all_voters_ideal_points,
+            voter_issue_weights,
+            candidate_list_by_district
+        )
+    end
+    return district_rankings
+end
 
 function prob_top_two_dirichlet(counts::Vector{Int}, rng::AbstractRNG, Nsamples::Int=100)
     numCands = length(counts)
@@ -549,22 +1085,6 @@ function prob_top_two_dirichlet(counts::Vector{Int}, rng::AbstractRNG, Nsamples:
     end
     return ptt
 end
-
-function expected_policy_utility(
-    c::Int,
-    ptt::Vector{Float64},
-    U1_n::Vector{Float64},
-    U2_n::Matrix{Float64}
-)
-    val = ptt[c] * U1_n[c]
-    @inbounds for j in eachindex(ptt)
-        if j != c
-            val += ptt[j] * U2_n[c, j]
-        end
-    end
-    return val
-end
-
 
 """
     run_strategic_exit_for_district!(
@@ -699,104 +1219,27 @@ function final_top_two(
     end
 end
 
-function run_strategic_exit_and_top2_for_district(
-    n::Int,
-    rankings_n::Matrix{Int},
-    U1_n::Vector{Float64},
-    U2_n::Matrix{Float64},
-    rng::AbstractRNG;
-    sample_size::Int=400,
-    Nsamples_dirichlet::Int=100,
-    max_rounds::Int=3
-)
-    numCands = size(U2_n, 1)
-    is_active = trues(numCands)
+function example_script()
 
-    run_strategic_exit_for_district!(
-        n,
-        rankings_n,
-        U1_n,
-        U2_n,
-        is_active,
-        rng;
-        sample_size=sample_size,
-        Nsamples_dirichlet=Nsamples_dirichlet,
-        max_rounds=max_rounds
+    rankings = build_voter_rankings_for_all_districts(50, voter_ideal_points, voter_issue_weights,
+        candidates
     )
 
-    # Then pick final top2
-    top2_locals = final_top_two(rankings_n, is_active)
-    return top2_locals, is_active
+    seat = 7
+    # for a given district
+    U1_seat, U2_seat = CandidatesSimulation.build_candidate_utilities_multi_issue(
+        voter_ideal_points, voter_question_positions, candidates, seat, issue_dimensions,
+        n_questions
+    )
+
+    is_active = [true for _ in 1:size(rankings)[2]]
+    run_strategic_exit_for_district!(seat, rankings[seat], U1_seat, U2_seat, is_active, rng)
+
+    top_2_locals = final_top_two(rankings[seat], is_active)
+
+    # we can then index candidates[seat] by the top_2_locals the get the runoff candidates,
+    # and run a simple majoritarian election off that
+
 end
-
-
-"""
-    run_entire_sim_for_issue(
-        pop_issues_ideal_i::Array{Float64,3},
-        pop_issues_positions_i::Array{Float64,3},
-        candidate_list_by_district::Vector{Vector{Int}},
-        dims_issue::Int,
-        Q::Int,
-        rng::AbstractRNG
-    ) -> Vector{Vector{Int}}
-
-For each district n in 1..N:
-  1) Build (U1[n], U2[n]) for that district's candidates.
-  2) Build voter_rankings[n].
-  3) run_strategic_exit_for_district(n, ...).
-Return a vector of length N, 
-where each entry is the top2 local indices for that district.
-"""
-function run_entire_sim_for_issue(
-    pop_issues_ideal_i::Array{Float64,3},
-    pop_issues_positions_i::Array{Float64,3},
-    candidate_list_by_district::Vector{Vector{Int}},
-    dims_issue::Int,
-    Q::Int,
-    rng::AbstractRNG=MersenneTwister(42);
-    sample_size::Int=400,
-    Nsamples_dirichlet::Int=100
-)
-    N = size(pop_issues_ideal_i, 1)  # number of districts
-    U1 = Vector{Vector{Float64}}(undef, N)
-    U2 = Vector{Matrix{Float64}}(undef, N)
-    district_rankings = Vector{Matrix{Int}}(undef, N)
-
-    for n in 1:N
-        # Build the candidate utilities
-        U1[n], U2[n] = build_candidate_utilities_for_issue(
-            pop_issues_ideal_i,
-            pop_issues_positions_i,
-            candidate_list_by_district,
-            n,
-            dims_issue,
-            Q
-        )
-        # Build the voter rankings
-        district_rankings[n] = build_voter_rankings_for_district(
-            pop_issues_positions_i,
-            candidate_list_by_district,
-            n
-        )
-    end
-
-    # Now run strategic exit for each district
-    top2_local_indices = Vector{Vector{Int}}(undef, N)
-    for n in 1:N
-        top2_local_indices[n] = run_strategic_exit_for_district(
-            n,
-            district_rankings,
-            U1,
-            U2,
-            rng;
-            sample_size=sample_size,
-            Nsamples_dirichlet=Nsamples_dirichlet
-        )
-    end
-
-    return top2_local_indices
-end
-
-
 
 end
