@@ -151,7 +151,7 @@ function run_proportional_election_sequence(fixed_params::FixedParams{K},
 
     if turnout_level != 404.0
         turnout_voters = HelpfulFunctions.get_bitmatrix_from_matrix_quartiles(engagement,
-            turnout_level, false)
+            turnout_level, true)
     else
         turnout_voters = nothing
     end
@@ -341,7 +341,7 @@ function run_majoritarian_sequence(fixed_params::FixedParams{K},
 
     if turnout_level != 404.0
         turnout_voters = HelpfulFunctions.get_bitmatrix_from_matrix_quartiles(engagement_matrix,
-            turnout_level, false)
+            turnout_level, true)
     else
         turnout_voters = nothing
     end # NEED TO TEST THIS

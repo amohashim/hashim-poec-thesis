@@ -270,12 +270,21 @@ const FACTOR_K_LOOKUP_TABLE = Dict{String,Int}(
 
 # turnout
 const FACTOR_L_LOOKUP_TABLE = Dict{String,Float64}(
-    "L0" => 404.0, "L_1" => 0.99, "L_2" => 0.75, "L_3" => 0.5
+
+    # vote if engagement > threshold
+    "L0" => 404.0,
+    "L_1" => 0.01, # so the top 99% vote
+    "L_2" => 0.5, # so the top 50% vote
+    "L_3" => 0.75, # so the top 25% vote
 )
 
 # strategic voting
 const FACTOR_M_LOOKUP_TABLE = Dict{String,Float64}(
-    "L0" => 404.0, "M_1" => 0.01, "M_2" => 0.4
+
+    # strategic if engagement > threshold
+    "L0" => 404.0,
+    "M_1" => 0.99, # so only the top 1% vote strategic
+    "M_2" => 0.6 # so only the top 40% vote strategic
 )
 
 # demographic attitudes
