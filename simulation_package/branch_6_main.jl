@@ -1,9 +1,9 @@
 cd("/Users/alihashim/Desktop/Online_Academic_Submissions/poec_thesis/simulation_package")
-include("SimulationPackage.jl") # Li_L1_L1_L2
+include("SimulationPackage.jl") # Li_L2_L1_L1
 
-# Endogeneous Parties (Factor X) => YES (L1)
+# Endogeneous Parties (Factor X) => NO (L2)
 # Dynamic Candidates (Factor Y) => YES (L1)
-# Imperfect Voters (Factor Z) => YES (L2)
+# Imperfect Voters (Factor Z) => NO (L1)
 
 using Base.Threads
 using Random
@@ -19,7 +19,7 @@ using ..ExperimentDesignInterfaceTools: read_in_subdesign, initialize_output_dat
 using ..ExperimentDesignInterfaceTools: intitialize_simulation_run
 using ..ExperimentParameters
 using ..BranchAgnosticSequences
-using ..Branch5Sequences
+using ..Branch6Sequences
 using ..TangianIndices
 
 function define_parameters()
@@ -78,10 +78,10 @@ function io_task(io_channel::Channel{DataFrame}, output_path::String, io_chunk_s
     end
 end
 
-const SUBDESIGN_FILE_NAME::String = "/Users/alihashim/Desktop/Online_Academic_Submissions/poec_thesis/design_matrix/issue_L1_party_L1_cand_L1_voter_L2.csv"
-const OUTPUT_PATH::String = "L1_L1_L1_L2_10001_to_10044_replications.csv"
-const RUN_RANGE::UnitRange = 10_001:10_044
-const IO_CHUNK_SIZE::Int = 1
+const SUBDESIGN_FILE_NAME::String = "/Users/alihashim/Desktop/Online_Academic_Submissions/poec_thesis/design_matrix/issue_L1_party_L2_cand_L1_voter_L1.csv"
+const OUTPUT_PATH::String = "L1_L1_L1_L2_0_to_0.csv"
+const RUN_RANGE::UnitRange = 0:0
+const IO_CHUNK_SIZE::Int = 100
 const N_THREADS::Int = 4
 
 function main()
@@ -124,18 +124,20 @@ function main()
                 )
 
                 begin
-                    voters, voter_ideal_points = run_voter_information_sequence(
-                        fixed_params, salience_structure, issue_structure, question_structure,
-                        district_dists; return_only_voters_and_ideal_points=true
-                    )
+                    voters, voter_ideal_points, voter_ideal_means, voter_ideal_variances,
+                    voter_issue_weights, voter_question_positions =
+                        run_voter_information_sequence(
+                            fixed_params, salience_structure, issue_structure, question_structure,
+                            district_dists; return_only_voters_and_ideal_points=false
+                        )
                 end
 
                 begin
-                    prop_eval_metrics, tangian_inputs, preferred_parties,
-                    voter_ideal_points, voter_question_positions, voter_issue_weights =
+                    prop_eval_metrics, tangian_inputs, preferred_parties =
                         run_proportional_election_sequence(
-                            fixed_params, issue_structure, representative_params, question_structure,
-                            branch_params, voter_ideal_points
+                            fixed_params, issue_structure, representative_params, branch_params,
+                            question_structure, voter_ideal_points, voter_ideal_means,
+                            voter_ideal_variances, voter_question_positions, voter_issue_weights
                         )
                 end
 
@@ -151,7 +153,7 @@ function main()
 
                 tangian_indices = computeTangianIndices(fixed_params, issue_structure,
                     question_structure, voter_question_positions, party_question_positions,
-                    winning_candidates, winning_parties, n_parties; single_collapsed_space=true
+                    winning_candidates, winning_parties, n_parties; single_collapsed_space=false
                 )
 
                 results_row = run_compile_results_sequence(spatial_corr_measurements,

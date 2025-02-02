@@ -7,7 +7,7 @@ export PartySimulation, CandidateSimulation, ElectionSimulation, StrategicExit
 export CondorcetSmithFunctions, ProportionalEvaluationMetrics, MajoritarianEvaluationMetrics
 export TangianIndices
 export BranchAgnosticSequences, Branch1Sequences, Branch2Sequences, Branch3Sequences
-export Branch4Sequences, Branch5Sequences
+export Branch4Sequences, Branch5Sequences, Branch6Sequences
 
 include("simulation_parameters.jl")
 include("helpful_functions.jl")
@@ -29,5 +29,6 @@ include("branch_2_sequences.jl")
 include("branch_3_sequences.jl")
 include("branch_4_sequences.jl")
 include("branch_5_sequences.jl")
+include("branch_6_sequences.jl")
 
 end
