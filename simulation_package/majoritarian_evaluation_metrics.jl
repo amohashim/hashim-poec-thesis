@@ -165,6 +165,10 @@ function find_district_info(seat::Int, candidates::Vector{Vector{Int}},
 
 end
 
+"""
+
+returns n_issues-vector of n_q x n_seats x n_candidates array
+"""
 function find_candidate_profiles_by_district(
     voter_question_positions::AbstractVector{Array{Float64,3}},
     candidates::AbstractVector{Vector{Int}}, n_issues::Int, n_questions::AbstractVector{Int},
@@ -193,36 +197,40 @@ function find_candidate_profiles_by_district(
     return candidate_profiles
 
 end
+"""
 
-# function compute_utilities_for_candidate_profiles(
-#     voter_question_positions::AbstractVector{Array{Float64,3}},
-#     candidate_profiles::AbstractVector{Array{Float64,3}},
-#     voter_issue_weights::Array{Float64,3},
-#     n_candidates_per_district::Int, n_seats::Int, pop_per_seat::Int, n_issues::Int)
+returns n_issue-vector of 
+"""
+function find_candidate_profiles_by_district(
+    voter_question_positions::AbstractVector{Array{Float64,3}},
+    candidates::AbstractVector{Vector{Int}}, n_issues::Int, n_questions::AbstractVector{Int},
+    n_seats::Int)::Vector{Vector{Matrix{Float64}}}
 
-#     voter_utilities = Array{Float64,3}(undef, n_seats, pop_per_seat, n_candidates_per_district)
+    candidate_profiles = Vector{Vector{Matrix{Float64}}}(undef, n_issues)
 
-#     @inbounds for issue in 1:n_issues
+    @inbounds for issue in 1:n_issues
 
-#         @inbounds for seat in 1:n_seats
+        n_q = n_questions[issue]
+        issue_profiles = Vector{Matrix{Float64}}(undef, n_q)
+        issue_profiles = Array{Float64,3}(undef, n_q, n_seats, n_candidates)
+        issue_question_positions = voter_question_positions[issue]
 
-#             profile = @view candidate_profiles[issue][:, seat, :]
+        @inbounds for seat in 1:n_seats
+            seat_issue_profiles = Matrix{undef,n_q,n_seats}
+            district_candidates = candidates[seat]
+            begin
+                issue_profiles[:, seat, 1:n_candidates] =
+                    issue_question_positions[:, seat, district_candidates]
+            end
+        end
 
-#             district_positions = @view voter_question_positions[issue][:, seat, :]
-#             seat_issue_weights = @view voter_issue_weights[issue, seat, :]
-#             utilities = [
-#                 sum(abs.(district_positions[:, i] .- profile[:, j]))
-#                 for i in 1:pop_per_seat, j in 1:n_candidates_per_district
-#             ]
+        candidate_profiles[issue] = issue_profiles
 
-#             voter_utilities[seat, :, :] += -1 .* utilities .* @view seat_issue_weights[:, :]
+    end
 
-#         end
-#     end
+    return candidate_profiles
 
-#     return voter_utilities
-
-# end
+end
 
 function compute_utilities_for_candidate_profiles(
     voter_question_positions::AbstractVector{Array{Float64,3}},
@@ -283,7 +291,6 @@ function evaluate_candidate_profiles(voter_question_positions::AbstractVector{Ar
 
     return candidate_profiles, voter_utilities_from_candidate_profiles
 end
-
 
 function determine_district_utility_metrics(winning_candidate_local_index::Int,
     social_utilities::Vector{Float64})

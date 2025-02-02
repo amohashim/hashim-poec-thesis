@@ -78,6 +78,29 @@ function scale_utilities(profile_utilities::AbstractArray{Float64}, a::Float64, 
     return scaled
 end
 
+
+"""
+min-max to [a,b]
+
+"""
+function scale_utilities(profile_utilities::Vector{Matrix{Float64}}, a::Float64, b::Float64)
+
+    min_val = minimum(profile_utilities)
+    max_val = maximum(profile_utilities)
+
+    n_seaats = legnth(profile_utilities)
+
+    scaled = Vector{Matrix{Int}}(undef, n_seaats)
+
+    for seat in 1:n_seats
+        seat_profile_utils = profile_utilities[seat]
+        normalized_utilities = (seat_profile_utils .- min_val) ./ (max_val - min_val)
+        scaled[seat] = normalized_utilities .* ((b - a) + a)
+    end
+
+    return scaled
+end
+
 function convert_party_ideal_points_to_arrs(party_ideal_points::AbstractVector{Matrix{Float64}},
     n_issues::Int, n_parties::Int, issue_dims::AbstractVector{Int},
 )

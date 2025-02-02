@@ -7,7 +7,7 @@ begin
         FACTOR_E_LOOK_UP_TABLE_D, FACTOR_F_LOOK_UP_TABLE_Q, FACTOR_F_LOOK_UP_TABLE_P,
         FACTOR_G_LOOKUP_TABLE_ALPHA, FACTOR_G_LOOKUP_TABLE_P, FACTOR_H_LOOKUP_TABLE,
         FACTOR_I_LOOKUP_TABLE, FACTOR_J_LOOKUP_TABLE, FACTOR_K_LOOKUP_TABLE, FACTOR_L_LOOKUP_TABLE,
-        FACTOR_M_LOOKUP_TABLE, FACTOR_N_LOOKUP_TABLE
+        FACTOR_M_LOOKUP_TABLE, FACTOR_N_LOOKUP_TABLE, MAP_TO_LOOKUP_TABLE, FACTOR_TO_NAME
 end
 
 using StaticArrays
@@ -238,7 +238,7 @@ const FACTOR_F_LOOK_UP_TABLE_P = Dict{String,SArray}(
     "F3_3" => SVector{5,Int}([5, 5, 5, 5, 5])
 )
 
-# engagment alpha
+# engagment alpha / political alpha
 const FACTOR_G_LOOKUP_TABLE_ALPHA = Dict{String,Float64}(
     "L1" => 0.99, "L2" => 0.5, "L3" => 0.01
 )
@@ -287,7 +287,7 @@ const FACTOR_M_LOOKUP_TABLE = Dict{String,Float64}(
     "M_2" => 0.6 # so only the top 40% vote strategic
 )
 
-# demographic attitudes
+# directional utilty
 const FACTOR_N_LOOKUP_TABLE = Dict{String,Bool}(
     "L0" => false,
     "N1_1" => false,
@@ -298,4 +298,125 @@ const FACTOR_N_LOOKUP_TABLE = Dict{String,Bool}(
     "N3_2" => true
 )
 
+const FACTOR_A_LEVELS_INTERP = Dict{String,Symbol}(
+    "L1" => :perfect,
+    "L2" => :moderate,
+    "L3" => :low
+)
+
+const FACTOR_B_LEVELS_INTERP = Dict{String,Symbol}(
+    "L1" => :none_to_low,
+    "L2" => :moderate,
+    "L3" => :moderate_to_high
+)
+
+const FACTOR_C_LEVELS_INTERP = Dict{String,Symbol}(
+    "C1_1" => :none,
+    "C2_1" => :none,
+    "C3_1" => :none,
+    "C1_2" => :moderate,
+    "C2_2" => :moderate,
+    "C3_2" => :moderate,
+    "C1_3" => :high,
+    "C2_3" => :high,
+    "C3_3" => :high
+)
+
+const FACTOR_D_LEVELS_INTERP = Dict{String,Symbol}(
+    "D1_1" => :none,
+    "D2_1" => :none,
+    "D3_1" => :none,
+    "D1_2" => :moderate,
+    "D2_2" => :moderate,
+    "D3_2" => :moderate,
+    "D1_3" => :high,
+    "D2_3" => :high,
+    "D3_3" => :high
+)
+
+const FACTOR_E_LEVELS_INTERP = Dict{String,Symbol}(
+    "L1" => :low,
+    "L2" => :moderate,
+    "L3" => :high
+)
+
+const FACTOR_F_LEVELS_INTERP = Dict{String,Int}(
+    "F1_1" => 2,
+    "F1_2" => 3,
+    "F1_3" => 5,
+    "F2_1" => 2,
+    "F2_2" => 3,
+    "F2_3" => 5,
+    "F3_1" => 2,
+    "F3_2" => 3,
+    "F3_3" => 5,
+)
+
+const FACTOR_G_LEVELS_INTERP = FACTOR_G_LOOKUP_TABLE_ALPHA
+const FACTOR_H_LEVELS_INTERP = FACTOR_H_LOOKUP_TABLE
+const FACTOR_I_LEVELS_INTERP = FACTOR_I_LOOKUP_TABLE
+const FACTOR_J_LEVELS_INTERP = FACTOR_J_LOOKUP_TABLE
+const FACTOR_K_LEVELS_INTERP = FACTOR_K_LOOKUP_TABLE
+
+const FACTOR_L_LEVELS_INTERP = Dict{String,Symbol}(
+
+    # vote if engagement > threshold
+    "L0" => :NA,
+    "L_1" => :full, # so the top 99% vote
+    "L_2" => :half, # so the top 50% vote
+    "L_3" => :quarter, # so the top 25% vote
+)
+
+# strategic voting
+const FACTOR_M_LEVELS_INTERP = Dict{String,Symbol}(
+
+    # strategic if engagement > threshold
+    "L0" => :NA,
+    "M_1" => :none, # so only the top 1% vote strategic
+    "M_2" => :some # so only the top 40% vote strategic
+)
+
+const FACTOR_N_LEVELS_INTERP = Dict{String,Symbol}(
+    "L0" => :NA,
+    "N1_1" => :proximity,
+    "N1_2" => :directional,
+    "N2_1" => :proximity,
+    "N2_2" => :directional,
+    "N3_1" => :proximity,
+    "N3_2" => :directional
+)
+
+const MAP_TO_LOOKUP_TABLE = Dict{Symbol,AbstractDict}(
+    :A => FACTOR_A_LEVELS_INTERP,
+    :B => FACTOR_B_LEVELS_INTERP,
+    :C => FACTOR_C_LEVELS_INTERP,
+    :D => FACTOR_D_LEVELS_INTERP,
+    :E => FACTOR_E_LEVELS_INTERP,
+    :F => FACTOR_F_LEVELS_INTERP,
+    :G => FACTOR_G_LEVELS_INTERP,
+    :H => FACTOR_H_LEVELS_INTERP,
+    :I => FACTOR_I_LEVELS_INTERP,
+    :J => FACTOR_J_LEVELS_INTERP,
+    :K => FACTOR_K_LEVELS_INTERP,
+    :L => FACTOR_L_LEVELS_INTERP,
+    :M => FACTOR_M_LEVELS_INTERP,
+    :N => FACTOR_N_LEVELS_INTERP
+)
+
+const FACTOR_TO_NAME = Dict{Symbol,Symbol}(
+    :A => :dem_homogeneity,
+    :B => :spat_corr_intended,
+    :C => :demo_id_salience,
+    :D => :dem_cleav_salience,
+    :E => :issue_structure,
+    :F => :n_positions,
+    :G => :alpha_political_class,
+    :H => :party_threshold,
+    :I => :alpha_candidate_entry,
+    :J => :n_parties_exog,
+    :K => :n_candidates_exog,
+    :L => :turnout_level,
+    :M => :stategic_voting_level,
+    :N => :utility_type
+)
 end

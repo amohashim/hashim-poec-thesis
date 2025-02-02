@@ -76,8 +76,93 @@ function plot_ideal_points_under_assumptions(voter_ideal_points::AbstractVector{
 
 end
 
-macro Name(arg)
-    string(arg)
+# translated from python using chatgpt model o3-mini-high on February 1, 2025
+function plot_structured_parties()
+
+    # Set random seed for reproducibility.
+    Random.seed!(1)
+
+    # -------------------------------
+    # Figure 1: Gaussian Population
+    # -------------------------------
+    n_points = 1000  # number of individuals in the population
+
+    # Generate a homogeneous (bivariate normal) population.
+    pop_mean_true = [0.0, 0.0]
+    pop_cov = [1.0 0.0; 0.0 1.0]
+    population = rand(MvNormal(pop_mean_true, pop_cov), n_points)'  # n_points × 2
+
+    # Compute the sample population mean.
+    pop_mean = vec(mean(population, dims=1))
+
+    # Structured Noise Model:
+    num_parties = 5
+    noise_sigma = 1.0
+    party_points = Array{Float64}(undef, num_parties, 2)
+    for i in 1:num_parties
+        error = rand(MvNormal([0.0, 0.0], [noise_sigma^2 0.0; 0.0 noise_sigma^2]))
+        party_points[i, :] = pop_mean + error
+    end
+
+    # Create the first plot with no gridlines, smaller points, and no legend.
+    p1 = scatter(population[:, 1], population[:, 2],
+        color="gray", alpha=0.5, markersize=2,
+        grid=false, label="")  # population points (small)
+
+    # Define a colorblind-friendly palette.
+    colorblind_colors = ["#117733", "#88CCEE", "#DDCC77", "#CC6677", "#882255"]
+
+    # Plot each party’s point with smaller markers.
+    for i in 1:num_parties
+        scatter!(p1, [party_points[i, 1]], [party_points[i, 2]],
+            color=colorblind_colors[i], markerstrokecolor="black",
+            markersize=6, label="")
+    end
+
+    xlabel!("Dimension 1")
+    ylabel!("Dimension 2")
+    plot!(p1, legend=false)
+
+    # -------------------------------
+    # Figure 2: Gaussian Mixture Population
+    # -------------------------------
+    n_components = 4
+    centers = [[2.0, 2.0], [-2.0, 2.0], [-2.0, -2.0], [2.0, -2.0]]
+    mix_cov = [0.5 0.0; 0.0 0.5]
+    n_each = div(n_points, n_components)
+
+    # Generate the mixture population.
+    population_mixture = Array{Float64}(undef, 0, 2)
+    for center in centers
+        component = rand(MvNormal(center, mix_cov), n_each)'  # each row is a point
+        population_mixture = vcat(population_mixture, component)
+    end
+
+    # Compute the overall population mean.
+    pop_mixture_mean = vec(mean(population_mixture, dims=1))
+
+    # Generate structured noise for the mixture.
+    party_points_mixture = Array{Float64}(undef, num_parties, 2)
+    for i in 1:num_parties
+        error = rand(MvNormal([0.0, 0.0], [noise_sigma^2 0.0; 0.0 noise_sigma^2]))
+        party_points_mixture[i, :] = pop_mixture_mean + error
+    end
+
+    # Create the second plot with the same modifications.
+    p2 = scatter(population_mixture[:, 1], population_mixture[:, 2],
+        color="gray", alpha=0.5, markersize=2,
+        grid=false, label="")
+
+    for i in 1:num_parties
+        scatter!(p2, [party_points_mixture[i, 1]], [party_points_mixture[i, 2]],
+            color=colorblind_colors[i], markerstrokecolor="black",
+            markersize=6, label="")
+    end
+
+    xlabel!("Dimension 1")
+    ylabel!("Dimension 2")
+    plot!(p2, legend=false)
+
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

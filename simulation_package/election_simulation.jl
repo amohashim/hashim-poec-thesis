@@ -893,6 +893,7 @@ using StaticArrays
 using LinearAlgebra: norm
 using DataStructures
 
+using ..ElectionSimulation
 using ..ElectionSimulation: poll_district!, expected_policy_utility
 using ..HelpfulFunctions: scale_utilities
 using ..CandidateSimulation: build_candidate_utilities_multi_issue
@@ -1113,11 +1114,10 @@ Stop if <=3 remain.
 We do *not* return top2 here; we just end with an updated `is_active`.
 """
 function run_strategic_exit_for_district!(
-    n::Int,
     rankings_n::Matrix{Int},
     U1_n::Vector{Float64},
     U2_n::Matrix{Float64},
-    is_active::Vector{Bool},
+    is_active::Union{Vector{Bool},BitVector},
     rng::AbstractRNG;
     sample_size::Int=400,
     Nsamples_dirichlet::Int=100,
@@ -1167,7 +1167,7 @@ function run_strategic_exit_for_district!(
 
             drop_utility = 0.0
             @inbounds for j in 1:numCands
-                if is_active[j]
+                if Bool(is_active[j])
                     drop_utility += ptt_drop[j] * U2_n[c_local, j]
                 end
             end
@@ -1219,26 +1219,97 @@ function final_top_two(
     end
 end
 
-function example_script()
+function run_single_round_election_with_exit(voter_ideal_points::AbstractVector{Array{Float64,3}},
+    voter_question_positions::AbstractVector{Array{Float64,3}},
+    candidates::Vector{Vector{Int}}, voter_issue_weights::Array{Float64,3}, n_seats::Int,
+    n_issues::Int, pop_per_seat::Int, issue_dimensions::AbstractVector{Int},
+    n_questions::AbstractVector{Int}, rng::AbstractRNG;
+    use_directional_utility::Bool=false, β::Float64=1.0,
+    strategic_voters::Union{Matrix{Bool},BitMatrix,Nothing}=nothing,
+    turnout_voters::Union{Matrix{Bool},BitMatrix,Nothing}=nothing,
+    n_initial_candidates::Int=10)
 
-    rankings = build_voter_rankings_for_all_districts(50, voter_ideal_points, voter_issue_weights,
-        candidates
-    )
+    election_proportions = Vector{Dict{Int,Float64}}(undef, n_seats)
+    voter_utilites = Array{Float64,3}(undef, n_seats, pop_per_seat, n_initial_candidates)
+    candidate_choices = Matrix{Int}(undef, n_seats, pop_per_seat)
+    is_active = Vector{Bool}(undef, n_initial_candidates)
+    dist_sums = Vector{Float64}(undef, n_initial_candidates)
 
-    seat = 7
-    # for a given district
-    U1_seat, U2_seat = CandidateSimulation.build_candidate_utilities_multi_issue(
-        voter_ideal_points, voter_question_positions, candidates, seat, issue_dimensions,
-        n_questions
-    )
+    @inbounds for seat in 1:n_seats
 
-    is_active = [true for _ in 1:size(rankings)[2]]
-    run_strategic_exit_for_district!(seat, rankings[seat], U1_seat, U2_seat, is_active, rng)
+        fill!(is_active, true)
+        fill!(dist_sums, 0.0)
 
-    top_2_locals = final_top_two(rankings[seat], is_active)
+        candidate_points, _ = ElectionSimulation.find_candidate_ideal_points(
+            voter_ideal_points, candidates[seat], n_initial_candidates, seat, n_issues
+        )
+        _, full_utilities = ElectionSimulation.assign_voters_to_candidates!(dist_sums,
+            voter_ideal_points, candidate_points, voter_issue_weights, n_initial_candidates,
+            n_issues, seat, pop_per_seat, issue_dimensions;
+            use_directional_utility=use_directional_utility, β=β
+        )
 
-    # we can then index candidates[seat] by the top_2_locals the get the runoff candidates,
-    # and run a simple majoritarian election off that
+        rankings = ElectionSimulation.compute_voter_rankings(
+            full_utilities, pop_per_seat, n_initial_candidates
+        )
+        U1_seat, U2_seat = build_candidate_utilities_multi_issue(
+            voter_ideal_points, voter_question_positions, candidates, seat, issue_dimensions,
+            n_questions
+        )
+
+        run_strategic_exit_for_district!(rankings, U1_seat, U2_seat, is_active, rng)
+        n_active_candidates = count(is_active)
+        remaining_candidates_seat = candidates[seat][is_active]
+
+        remaining_candidate_points, candidate_map = ElectionSimulation.find_candidate_ideal_points(
+            voter_ideal_points, remaining_candidates_seat, n_active_candidates, seat, n_issues
+        )
+
+        dist_sums_active = zeros(Float64, n_active_candidates)
+        results, remaining_utils = ElectionSimulation.assign_voters_to_candidates!(dist_sums_active,
+            voter_ideal_points, remaining_candidate_points, voter_issue_weights, n_active_candidates,
+            n_issues, seat, pop_per_seat, issue_dimensions;
+            use_directional_utility=use_directional_utility, β=β)
+
+
+        if isnothing(strategic_voters) || n_active_candidates <= 3
+            candidate_choices[seat, :] = results
+        else
+            is_strategic = strategic_voters[seat, :]
+            rankings = ElectionSimulation.compute_voter_rankings(
+                remaining_utils, pop_per_seat, n_active_candidates
+            )
+            poll_counts = zeros(Int, n_active_candidates)
+            poll_district!(poll_counts, rankings, [true for _ in 1:n_active_candidates], rng)
+            top_3_cands = partialsortperm(poll_counts, 1:3, rev=true)
+            results = ElectionSimulation.make_preferred_candidates_strategic(
+                rankings, top_3_cands, is_strategic, vec(results)
+            )
+            candidate_choices[seat, :] = results
+        end
+
+        if isnothing(turnout_voters)
+            props = Dict(idx => ct / pop_per_seat for (idx, ct) in counter(results))
+        else
+            turns_out = turnout_voters[seat, :]
+            raw_vote_count = ElectionSimulation.count_votes(
+                vec(results), turns_out, n_active_candidates
+            )
+            props = Dict{Int,Float64}(
+                candidate => vote_count / count(turnout_voters[seat, :])
+                for (candidate, vote_count) in enumerate(raw_vote_count)
+            )
+        end
+
+        election_proportions[seat] = ElectionSimulation.map_global_indx_to_props(
+            candidate_map, props
+        )
+
+        voter_utilites[seat, :, :] = full_utilities
+
+    end
+
+    return election_proportions, voter_utilites, candidate_choices
 
 end
 

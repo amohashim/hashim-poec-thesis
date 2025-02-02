@@ -78,9 +78,9 @@ function io_task(io_channel::Channel{DataFrame}, output_path::String, io_chunk_s
     end
 end
 
-const SUBDESIGN_FILE_NAME::String = "/Users/alihashim/Desktop/Online_Academic_Submissions/poec_thesis/design_matrix/issue_L1_party_L1_cand_L2_voter_L2.csv"
-const OUTPUT_PATH::String = "L_L1_L2_L2_1_to_1000_replications.csv"
-const RUN_RANGE::UnitRange = 2001:2511
+const SUBDESIGN_FILE_NAME::String = "/Users/alihashim/Desktop/Online_Academic_Submissions/poec_thesis/design_matrix/issue_L3_party_L1_cand_L2_voter_L2.csv"
+const OUTPUT_PATH::String = "L3_L1_L2_L2_30001_to_31104_replications.csv"
+const RUN_RANGE::UnitRange = 30_001:31_104
 const IO_CHUNK_SIZE::Int = 1
 const N_THREADS::Int = 4
 
@@ -101,7 +101,7 @@ function main()
 
     Threads.@threads for simulation_run in RUN_RANGE
 
-        for _ in 1:5
+        for _ in 1:1
 
             println(simulation_run)
 

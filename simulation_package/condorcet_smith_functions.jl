@@ -145,5 +145,28 @@ function find_condorcet_and_smith_sets_for_state(rankings::AbstractArray{Int,3})
     return condorcet_winners, smith_sets, smith_winners
 end
 
+"""
+    process_all_districts(rankings::AbstractArray{Int,3})
+
+Process a 3D rankings array of dimensions N×A×C (districts × voters × candidates)
+and returns a triple of vectors: (condorcet_winners, smith_sets, smith_winners)
+for the districts.
+"""
+function find_condorcet_and_smith_sets_for_state(rankings::Vector{Matrix{Int}})
+
+    N = size(rankings)[1]
+    condorcet_winners = Vector{Union{Int,Nothing}}(undef, N)
+    smith_sets = Vector{Vector{Int}}(undef, N)
+    smith_winners = Vector{Union{Int,Nothing}}(undef, N)
+    @inbounds for n in 1:N
+
+        cd, ss, sw = find_condorcet_and_smith_sets_for_district(@view rankings[n, :, :])
+        condorcet_winners[n] = cd
+        smith_sets[n] = ss === nothing ? Int[] : ss
+        smith_winners[n] = sw
+    end
+    return condorcet_winners, smith_sets, smith_winners
+end
+
 
 end
